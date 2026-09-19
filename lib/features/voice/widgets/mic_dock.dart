@@ -23,6 +23,7 @@ class MicDock extends StatelessWidget {
     this.showTranscript = true,
     this.scrim = true,
     this.idleHint = 'Tap and tell me where to',
+    this.caption,
   });
 
   final VoiceState state;
@@ -40,6 +41,11 @@ class MicDock extends StatelessWidget {
   /// dock disappears into the colour instead of colliding with the mic.
   final bool scrim;
   final String idleHint;
+
+  /// Overrides the caption entirely. For states the dock cannot infer from
+  /// [VoiceState] — "Connecting…", say, where the dock would otherwise read
+  /// "Thinking…" and claim the assistant is working on something.
+  final String? caption;
 
   @override
   Widget build(BuildContext context) {
@@ -102,12 +108,14 @@ class MicDock extends StatelessWidget {
           Positioned(
             left: 0,
             right: 0,
-            bottom: 18,
+            // Was 18 when the caption sat above the button; the caption is
+            // below it now and needs the clearance instead.
+            bottom: 10,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                if (showTranscript) IgnorePointer(child: _caption(context)),
                 MicButton(state: state, level: level, onTap: onTap),
+                if (showTranscript) IgnorePointer(child: _caption(context)),
               ],
             ),
           ),
@@ -117,7 +125,8 @@ class MicDock extends StatelessWidget {
   }
 
   Widget _caption(BuildContext context) {
-    final String text = switch (state) {
+    final String text = caption ??
+        switch (state) {
       VoiceState.idle => idleHint,
       VoiceState.listening => partial.isEmpty ? 'Listening…' : partial,
       VoiceState.thinking => 'Thinking…',
@@ -127,12 +136,20 @@ class MicDock extends StatelessWidget {
         state == VoiceState.listening && partial.isNotEmpty;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(28, 0, 28, 14),
+      // Sits under the mic now, so the breathing room moves to the top.
+      padding: const EdgeInsets.fromLTRB(28, 14, 28, 0),
       child: AnimatedSize(
         duration: const Duration(milliseconds: 220),
         curve: Curves.easeOutCubic,
+        // Fade *through*, not across. The default cross-fade leaves both
+        // captions at half opacity on top of each other, and two centred
+        // strings of different lengths superimposed read as neither —
+        // "Starting a session…" over "Thinking…" came out as "StartThinking…".
+        // The old one is gone by the midpoint, the new one starts there.
         child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 220),
+          duration: const Duration(milliseconds: 280),
+          switchOutCurve: const Interval(0, 0.5, curve: Curves.easeOut),
+          switchInCurve: const Interval(0.5, 1, curve: Curves.easeIn),
           child: Container(
             key: ValueKey<String>(text),
             constraints: const BoxConstraints(maxWidth: 320),
