@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 
+import '../../app/app_config.dart';
 import '../../app/app_theme.dart';
-import '../voice/speech_service.dart';
-import '../voice/voice_controller.dart';
+import '../../orb/rezolve_orb.dart';
+import '../conversation/conversation.dart';
+import '../conversation/demo_conversation.dart';
+import '../conversation/live_conversation.dart';
+import '../voice/voice_controller.dart' show VoiceState;
 import '../voice/widgets/mic_dock.dart';
-import 'chat_controller.dart';
-import 'data/agent_service.dart';
 import 'model/chat_message.dart';
 import 'widgets/chat_composer.dart';
 import 'widgets/chat_message_view.dart';
@@ -14,30 +16,32 @@ import 'widgets/typing_indicator.dart';
 /// The conversation.
 ///
 /// Voice first: the mic sits alone at the bottom over its bloom of colour, and
-/// the keyboard is one tap away for anyone who would rather type. Speech comes
-/// in through [SpeechService], so swapping the simulator for a real recogniser
-/// touches nothing on this screen.
+/// the keyboard is one tap away for anyone who would rather type.
+///
+/// This screen has no idea whether it is driving a real voice call or the
+/// offline demo. It renders a [Conversation] and nothing else — which is why
+/// [AppConfig.liveVoice] can flip between the two without touching any widget.
 class ChatPage extends StatefulWidget {
   const ChatPage({
     super.key,
     this.title = 'New trip',
     this.opener,
-    this.agent,
-    this.speech,
+    this.conversation,
     this.autoListen = false,
   });
 
   final String title;
+
+  /// The line that started this conversation on the home screen. It is sent as
+  /// the first message so the assistant answers it rather than just greeting.
   final String? opener;
 
-  /// Who answers. Defaults to the built-in [ScriptedAgent].
-  final AgentService? agent;
+  /// Override who is talking — tests pass a fake. Defaults to a live call when
+  /// [AppConfig.liveVoice] is on, and the scripted demo otherwise.
+  final Conversation? conversation;
 
-  /// Where the words come from. Defaults to [SimulatedSpeechService].
-  final SpeechService? speech;
-
-  /// Open the mic as soon as the screen has slid into place — what the mic
-  /// button on the home screen wants.
+  /// Retained for the home screen's mic button. A live call opens its mic as
+  /// soon as it connects, so this only affects the demo.
   final bool autoListen;
 
   @override
@@ -45,65 +49,44 @@ class ChatPage extends StatefulWidget {
 }
 
 class _ChatPageState extends State<ChatPage> {
-  late final ChatController _chat = ChatController(
-    service: widget.agent ?? ScriptedAgent(),
-    opener: widget.opener,
-  )..addListener(_onChatChanged);
+  late final Conversation _talk = widget.conversation ?? _defaultConversation();
 
-  late final VoiceController _voice = VoiceController(
-    service: widget.speech ?? SimulatedSpeechService(),
-  )..addListener(_onVoiceChanged);
-
-  void _onVoiceChanged() => setState(() {});
+  Conversation _defaultConversation() => AppConfig.liveVoice
+      ? LiveConversation(opener: widget.opener)
+      : DemoConversation(opener: widget.opener);
 
   final ScrollController _scroll = ScrollController();
   bool _saved = false;
   bool _typingMode = false;
-  int _spokenUpTo = 0;
 
   @override
   void initState() {
     super.initState();
-    if (widget.autoListen) {
-      // After the slide-up has finished, so the first thing the user sees is
-      // the mic arriving, not already listening.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        Future<void>.delayed(const Duration(milliseconds: 520), () {
-          if (mounted) _voice.startListening();
-        });
-      });
-    }
+    _talk.addListener(_onChanged);
+    // Immediately. This used to wait for the slide-up to finish, so the screen
+    // would not arrive mid-connection — but connecting is now what the screen
+    // shows, and the assistant takes long enough to answer that every fraction
+    // of a second spent not asking for it is wasted.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await _talk.start();
+      if (!mounted) return;
+      if (widget.autoListen && _talk is DemoConversation) {
+        await _talk.onMicTap();
+      }
+    });
   }
 
   @override
   void dispose() {
-    _chat.removeListener(_onChatChanged);
-    _voice.removeListener(_onVoiceChanged);
-    _chat.dispose();
-    _voice.dispose();
+    _talk.removeListener(_onChanged);
+    _talk.dispose();
     _scroll.dispose();
     super.dispose();
   }
 
-  void _onChatChanged() {
-    // Keep the dock in step with the conversation: thinking while the reply is
-    // being written, speaking once it lands.
-    if (_chat.isTyping) {
-      _voice.think();
-    } else {
-      final List<ChatMessage> all = _chat.messages;
-      if (all.length > _spokenUpTo) {
-        _spokenUpTo = all.length;
-        final ChatMessage last = all.last;
-        if (!last.isUser) {
-          _voice.speak(last.text);
-        } else {
-          _voice.settle();
-        }
-      } else {
-        _voice.settle();
-      }
-    }
+  void _onChanged() {
+    if (!mounted) return;
     setState(() {});
     _scrollToEnd();
   }
@@ -121,29 +104,14 @@ class _ChatPageState extends State<ChatPage> {
     });
   }
 
-  /// One button, four meanings — whatever is happening, tapping the mic does
-  /// the obvious next thing.
-  Future<void> _onMic() async {
-    switch (_voice.state) {
-      case VoiceState.idle:
-        await _voice.startListening();
-      case VoiceState.listening:
-        // Speech-to-text is the input method: what comes back is just a
-        // message, indistinguishable from a typed one.
-        final String? said = await _voice.stopListening();
-        if (said == null) return;
-        await _chat.send(said);
-      case VoiceState.speaking:
-        _voice.stopSpeaking();
-      case VoiceState.thinking:
-        break; // let it finish
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    final List<ChatMessage> messages = _chat.messages;
-    final bool empty = messages.isEmpty && !_chat.isTyping;
+    final List<ChatMessage> messages = _talk.messages;
+    final bool connecting = _talk.status == ConversationStatus.connecting;
+    // While connecting there is nothing to say yet, and inviting someone to
+    // talk to an assistant that has not arrived is a lie the old empty state
+    // was telling.
+    final bool empty = messages.isEmpty && !_talk.isTyping;
 
     return Scaffold(
       backgroundColor: AppColors.canvas,
@@ -158,10 +126,17 @@ class _ChatPageState extends State<ChatPage> {
               onBack: () => Navigator.of(context).maybePop(),
               onSave: () => setState(() => _saved = !_saved),
             ),
+            // Only failures get a banner. Connecting is not a footnote — it
+            // is the whole screen, below.
+            if (_talk.status == ConversationStatus.failed &&
+                _talk.statusMessage != null)
+              _StatusBanner(message: _talk.statusMessage!),
             Expanded(
               child: Stack(
                 children: <Widget>[
-                  if (empty)
+                  if (connecting)
+                    _ConnectingState(message: _talk.statusMessage)
+                  else if (empty)
                     const _EmptyState()
                   else
                     ListView.separated(
@@ -172,7 +147,7 @@ class _ChatPageState extends State<ChatPage> {
                         AppSpacing.pageH,
                         _typingMode ? 16 : 190,
                       ),
-                      itemCount: messages.length + (_chat.isTyping ? 1 : 0),
+                      itemCount: messages.length + (_talk.isTyping ? 1 : 0),
                       separatorBuilder: (BuildContext context, int i) =>
                           SizedBox(height: _gapAfter(messages, i)),
                       itemBuilder: (BuildContext context, int i) {
@@ -190,7 +165,7 @@ class _ChatPageState extends State<ChatPage> {
                           child: ChatMessageView(
                             message: m,
                             showHeader: newSpeaker,
-                            onReply: _chat.send,
+                            onReply: _talk.send,
                           ),
                         );
                       },
@@ -201,12 +176,16 @@ class _ChatPageState extends State<ChatPage> {
                       right: 0,
                       bottom: 0,
                       child: MicDock(
-                        state: _voice.state,
-                        level: _voice.level,
-                        partial: _voice.partial,
-                        onTap: _onMic,
+                        state: _talk.voiceState,
+                        level: _talk.level,
+                        partial: _talk.partial,
+                        onTap: _talk.onMicTap,
                         auraHeight: 268,
-                        idleHint: 'Tap and tell me where to',
+                        idleHint: _micHint,
+                        // Overrides the dock's own caption while connecting,
+                        // which would otherwise read "Thinking…" — the orb is
+                        // not thinking, nobody has arrived yet.
+                        caption: connecting ? _talk.statusMessage : null,
                       ),
                     ),
                   if (!_typingMode)
@@ -224,8 +203,8 @@ class _ChatPageState extends State<ChatPage> {
             ),
             if (_typingMode)
               ChatComposer(
-                enabled: !_chat.isTyping,
-                onSend: _chat.send,
+                enabled: _talk.canType && !_talk.isTyping,
+                onSend: _talk.send,
                 onSwitchToVoice: () => setState(() => _typingMode = false),
               ),
           ],
@@ -234,10 +213,67 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
+  /// The caption under the mic. On a live call the mic is a mute toggle, so it
+  /// must not say "tap to talk" — the assistant is already listening.
+  String get _micHint => switch (_talk.status) {
+        ConversationStatus.connecting => 'Connecting…',
+        ConversationStatus.ready when _talk is LiveConversation =>
+          _talk.voiceState == VoiceState.idle
+              ? 'Tap the mic to talk'
+              : 'Listening — just talk',
+        ConversationStatus.failed => 'Tap the keyboard to type instead',
+        ConversationStatus.ended => 'Call ended',
+        _ => 'Tap and tell me where to',
+      };
+
   /// Tighter spacing inside one speaker's run, looser between speakers.
   static double _gapAfter(List<ChatMessage> messages, int i) {
     if (i + 1 >= messages.length) return 20;
     return messages[i].author == messages[i + 1].author ? 10 : 22;
+  }
+}
+
+/// A one-line explanation across the top: connecting, or why it failed.
+/// A line across the top when something has gone wrong. Connecting has its own
+/// full-width state in the middle of the screen; this is only for failures.
+class _StatusBanner extends StatelessWidget {
+  const _StatusBanner({required this.message});
+
+  final String message;
+  static const bool failed = true;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(AppSpacing.pageH, 0, AppSpacing.pageH, 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: failed ? const Color(0xFFFFEDED) : AppColors.brandWash,
+        borderRadius: BorderRadius.circular(AppSpacing.chipRadius),
+      ),
+      child: Row(
+        children: <Widget>[
+          Icon(
+            failed ? Icons.error_outline_rounded : Icons.wifi_tethering_rounded,
+            size: 17,
+            color: failed ? const Color(0xFFC0392B) : AppColors.brand,
+          ),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                letterSpacing: -0.1,
+                color: failed ? const Color(0xFFC0392B) : AppColors.brand,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -360,6 +396,56 @@ class _RoundButton extends StatelessWidget {
             height: 46,
             child: Icon(icon, size: 21, color: foreground),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// What the screen shows while the assistant is on its way.
+///
+/// It takes the middle of the screen rather than a strip at the top, because
+/// for the ten-odd seconds it lasts it is the only thing happening: the app is
+/// in the LiveKit room, but the agent negotiates its own connection separately
+/// and takes about that long to arrive. Showing the usual "tap and tell me
+/// where to" through that window invites someone to talk to an empty room.
+class _ConnectingState extends StatelessWidget {
+  const _ConnectingState({this.message});
+
+  final String? message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: const Alignment(0, -0.35),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 40),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const ExcludeSemantics(
+              child: RezolveOrb(
+                size: 92,
+                headroom: 0,
+                mood: OrbMood.thinking,
+                playfulness: 0,
+                quality: OrbQuality.balanced,
+              ),
+            ),
+            const SizedBox(height: 22),
+            Text(
+              message ?? 'Connecting…',
+              textAlign: TextAlign.center,
+              style: AppText.section,
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Getting your assistant on the line. This takes a few seconds '
+              'the first time.',
+              textAlign: TextAlign.center,
+              style: AppText.body,
+            ),
+          ],
         ),
       ),
     );
