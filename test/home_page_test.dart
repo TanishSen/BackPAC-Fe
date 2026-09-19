@@ -48,11 +48,15 @@ void main() {
     await tester.pump(const Duration(milliseconds: 600));
 
     expect(find.byType(ChatPage), findsOneWidget);
+    // The home screen's job ends here: the chat opened, carrying what was
+    // asked for. How the assistant answers is chat_page_test's concern — it
+    // depends on which conversation engine is running, and this test should
+    // not care.
     expect(find.text('Find me flights for my next trip'), findsOneWidget);
 
-    // Let the assistant answer, so no timer is left running at teardown.
+    // Let the open animation and the deferred connect settle, so no timer is
+    // left running at teardown.
     await tester.pump(const Duration(seconds: 2));
-    expect(find.textContaining('When are you thinking of going'), findsOneWidget);
   });
 
   testWidgets('history filters down to one mode', (WidgetTester tester) async {

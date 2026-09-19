@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:backPAC/features/chat/chat_page.dart';
 import 'package:backPAC/features/chat/data/agent_service.dart';
+import 'package:backPAC/features/conversation/conversation.dart';
+import 'package:backPAC/features/conversation/demo_conversation.dart';
+import 'package:backPAC/features/voice/voice_controller.dart' show VoiceState;
+import 'package:flutter/foundation.dart';
 import 'package:backPAC/features/chat/model/chat_message.dart';
 import 'package:backPAC/features/chat/widgets/typing_indicator.dart';
 import 'package:backPAC/features/voice/widgets/mic_button.dart';
@@ -46,17 +50,91 @@ Future<void> pumpChat(
   AgentService? agent,
 }) async {
   usePhone(tester);
+  // These tests are about the screen, so they drive the offline conversation
+  // with a fake agent — no backend, no LiveKit, no network.
   await tester.pumpWidget(MaterialApp(
     home: ChatPage(
       title: 'Goa',
       opener: opener,
-      agent: agent ?? _FastAgent(),
+      conversation: DemoConversation(
+        agent: agent ?? _FastAgent(),
+        opener: opener,
+      ),
     ),
   ));
   await tester.pump(const Duration(milliseconds: 100));
 }
 
+/// A conversation parked in one state, so the screen can be checked against it.
+class _StuckConversation extends ChangeNotifier implements Conversation {
+  _StuckConversation(this.status, this.statusMessage);
+
+  @override
+  final ConversationStatus status;
+  @override
+  final String? statusMessage;
+
+  @override
+  List<ChatMessage> get messages => const <ChatMessage>[];
+  @override
+  bool get isTyping => false;
+  @override
+  VoiceState get voiceState => VoiceState.thinking;
+  @override
+  ValueListenable<double> get level => ValueNotifier<double>(0);
+  @override
+  String get partial => '';
+  @override
+  bool get canType => false;
+  @override
+  Future<void> start() async {}
+  @override
+  Future<void> onMicTap() async {}
+  @override
+  Future<void> send(String text) async {}
+  @override
+  Future<void> end() async {}
+}
+
 void main() {
+  testWidgets('while connecting the screen says so, and does not invite talking',
+      (WidgetTester tester) async {
+    usePhone(tester);
+    await tester.pumpWidget(MaterialApp(
+      home: ChatPage(
+        title: 'Goa',
+        conversation: _StuckConversation(
+          ConversationStatus.connecting,
+          'Waiting for your assistant…',
+        ),
+      ),
+    ));
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(find.text('Waiting for your assistant…'), findsWidgets);
+    // The assistant has not arrived, so the screen must not be asking the user
+    // to start talking to it.
+    expect(find.text('Where are we going?'), findsNothing);
+    expect(find.text('Listening…'), findsNothing);
+    expect(find.text('Thinking…'), findsNothing,
+        reason: 'the dock caption should be the connecting message, not this');
+  });
+
+  testWidgets('a failed connection explains itself', (WidgetTester tester) async {
+    usePhone(tester);
+    await tester.pumpWidget(MaterialApp(
+      home: ChatPage(
+        title: 'Goa',
+        conversation: _StuckConversation(
+          ConversationStatus.failed,
+          "Your assistant didn't pick up. Try again in a moment.",
+        ),
+      ),
+    ));
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(find.textContaining("didn't pick up"), findsOneWidget);
+  });
+
   testWidgets('an opener starts the conversation and gets answered',
       (WidgetTester tester) async {
     await pumpChat(tester,
