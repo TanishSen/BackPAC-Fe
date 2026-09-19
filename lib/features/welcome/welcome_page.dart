@@ -2,12 +2,16 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../app/app_config.dart';
 import '../../app/app_theme.dart';
 import '../../orb/rezolve_orb.dart';
 import '../home/home_page.dart';
+import 'data/greeting_client.dart';
+import 'data/greeting_voice.dart';
 import 'widgets/orb_reflection.dart';
 import 'widgets/primary_button.dart';
 import 'widgets/speech_bubble.dart';
@@ -32,14 +36,22 @@ class _WelcomePageState extends State<WelcomePage>
   static const String _headlineLead = 'Your ';
   static const String _headlineAccent = 'Smart Assistant';
   static const String _headlineTail = ' for any planning…';
-  /// What it says when you poke it. Short, and never the same twice running.
-  static const List<String> _pokeLines = <String>[
+  /// What it says with no backend to speak for it. The screen still works
+  /// offline — it just does it silently, exactly as it always did.
+  static const List<String> _fallbackPoke = <String>[
     'Hehe!',
     'That tickles',
-    'Hi there!',
+    'Hey, stop it!',
     'Boop',
     'Again?',
     'Ready when you are',
+  ];
+
+  static const List<String> _fallbackIdle = <String>[
+    'So… where are we going?',
+    'Still thinking?',
+    "Let's plan something!",
+    'What are you thinking?',
   ];
 
   static const String _subtitle =
@@ -60,44 +72,162 @@ class _WelcomePageState extends State<WelcomePage>
   final AudioPlayer _dropSound = AudioPlayer(playerId: 'orb-poke')
     ..setReleaseMode(ReleaseMode.stop)
     ..setPlayerMode(PlayerMode.lowLatency);
+  /// Everything the orb can say, fetched in the background just after the
+  /// opening line. Null until it arrives, and null forever if the backend
+  /// isn't running — in which case the screen behaves silently, as it always
+  /// did.
+  late final GreetingClient _greetings =
+      GreetingClient(baseUrl: AppConfig.backendUrl);
+  final GreetingVoice _voice = GreetingVoice();
+  WelcomeLines? _lines;
+
+  /// Whether the opening line has gone out, so the silent fallback below and
+  /// the arriving audio never both greet.
+  bool _hasGreeted = false;
+
+  /// How many times it has nudged an idle user. Drives the gaps below, and
+  /// resets the moment they do anything.
+  int _nudges = 0;
+
+  /// How long to wait before speaking up again, by nudge count.
+  ///
+  /// Escalating on purpose. The first prompt lands quickly, while someone is
+  /// still deciding whether this thing is worth their time — after that it
+  /// backs off, because an orb that pipes up every three seconds stops being
+  /// charming almost immediately. The last gap repeats forever.
+  static const List<Duration> _idleGaps = <Duration>[
+    Duration(milliseconds: 3500),
+    Duration(seconds: 7),
+    Duration(seconds: 12),
+    Duration(seconds: 20),
+    Duration(seconds: 30),
+  ];
+
   String _bubble = 'Hello!';
   OrbMood _mood = OrbMood.idle;
   bool _greeting = false;
   Timer? _greetOnce;
-  Timer? _greetAgain;
+  Timer? _idleNudge;
   Timer? _hush;
+  Timer? _bubbleOff;
+  Timer? _pokeReply;
 
   @override
   void initState() {
     super.initState();
-    _greetOnce = Timer(AppDurations.greetingDelay, _sayHello);
-    _greetAgain =
-        Timer.periodic(AppDurations.greetingInterval, (_) => _sayHello());
+    unawaited(_load());
+    // A safety net, not the plan: if the greeting audio has not arrived by now
+    // (no backend, slow network), greet silently rather than open on nothing.
+    _greetOnce = Timer(AppDurations.greetingDelay, () {
+      if (mounted && !_hasGreeted) _greet(null);
+    });
+    _voice.speaking.addListener(_onSpeakingChanged);
   }
 
-  /// Bubble in, orb talks, orb settles. The bubble stays — it is part of the
-  /// composition — but the orb only speaks in short, calm bursts.
-  void _sayHello() {
-    if (!mounted) return;
-    _hush?.cancel();
+  /// The opening line first, because it is wanted immediately; the rest in the
+  /// background, because a tap must not wait on a round trip.
+  Future<void> _load() async {
+    final SpokenLine? opening = await _greetings.fetchGreeting();
+    if (mounted && opening != null) {
+      // Straight away. The greeting is the first thing the app does, so it
+      // waits on nothing but its own audio — no timer, no stagger.
+      if (!_hasGreeted) _greet(opening);
+    }
+
+    final WelcomeLines? lines = await _greetings.fetchWelcomeLines();
+    if (!mounted || lines == null) return;
+    setState(() => _lines = lines);
+  }
+
+  /// Open the conversation. Spoken if the audio made it, silent if it didn't.
+  void _greet(SpokenLine? opening) {
+    _hasGreeted = true;
+    _greetOnce?.cancel();
+    if (opening != null) {
+      _say(opening);
+    } else {
+      _show('Hello!');
+    }
+  }
+
+  // --- saying things --------------------------------------------------------
+
+  /// Say a line out loud: bubble, mouth, and the level track that shapes it.
+  void _say(SpokenLine line) {
+    _hush?.cancel(); // the voice's own clock decides when this one ends
+    _idleNudge?.cancel();
+    _bubbleOff?.cancel();
     setState(() {
       _greeting = true;
-      _bubble = 'Hello!';
+      _bubble = line.text;
       _mood = OrbMood.speaking;
     });
-    _hush = Timer(AppDurations.greetingSpeech, () {
+    unawaited(_voice.say(line));
+  }
+
+  /// Show a line without saying it — the offline path, and the stand-in while
+  /// the audio is still on its way.
+  void _show(String text, {Duration hold = AppDurations.greetingSpeech}) {
+    _hush?.cancel();
+    _idleNudge?.cancel();
+    _bubbleOff?.cancel();
+    setState(() {
+      _greeting = true;
+      _bubble = text;
+      _mood = OrbMood.speaking;
+    });
+    _hush = Timer(hold, () {
       if (!mounted) return;
       setState(() => _mood = OrbMood.idle);
-      // Finish the hello with a hop, so the first thing you see the orb do is
-      // unmistakably alive rather than a wait for it to decide on something.
+      // Finish with a hop, so the first thing you see it do is unmistakably
+      // alive rather than a wait for it to decide on something.
       _orb.play(OrbAntic.doubleHop);
+      _hideBubble();
+      _scheduleNudge();
     });
   }
 
-  /// Tapping the orb: it hops and looks at your finger on its own — this adds
-  /// a line in the bubble and a short burst of chatter to go with it.
+  /// The orb reached the end of a spoken line: settle, land it, put the bubble
+  /// away, and start counting down to the next nudge.
+  void _onSpeakingChanged() {
+    if (_voice.speaking.value || !mounted) return;
+    setState(() => _mood = OrbMood.idle);
+    _orb.play(OrbAntic.doubleHop);
+    _hideBubble();
+    _scheduleNudge();
+  }
+
+  /// Clear the speech bubble a beat after the voice stops.
+  ///
+  /// The bubble is a caption, not a sign: it belongs to the line being said and
+  /// goes away with it, leaving the orb sitting quietly. The short delay is so
+  /// the last word is readable rather than snatched away on the final syllable.
+  void _hideBubble() {
+    _bubbleOff?.cancel();
+    _bubbleOff = Timer(const Duration(milliseconds: 550), () {
+      if (mounted) setState(() => _greeting = false);
+    });
+  }
+
+  // --- being poked ----------------------------------------------------------
+
+  /// How long after the last tap the orb answers back.
+  ///
+  /// Every tap gets the immediate half — the haptic, the plink, and a hop the
+  /// orb does on its own. The *reply* waits for you to finish. Someone
+  /// drumming on it should get a bouncing orb, not eight half-spoken lines
+  /// sawing each other off; one indignant sentence once they stop is both
+  /// funnier and the only thing that sounds like a reaction.
+  static const Duration _pokeReplyDelay = Duration(milliseconds: 650);
+
+  /// Tapping the orb: it hops and looks at your finger on its own. This gives
+  /// it something to say about being prodded — once you have stopped prodding.
   void _onPoke() {
     HapticFeedback.lightImpact();
+    // A browser will not play sound until the page has been interacted with,
+    // so the opening greeting is usually silent on web. This is the first
+    // gesture there is — let it through.
+    unawaited(_voice.retryAudio());
     unawaited(_dropSound.stop().then((_) {
       if (mounted) {
         _dropSound.play(
@@ -105,34 +235,105 @@ class _WelcomePageState extends State<WelcomePage>
         );
       }
     }));
+
+    // They are clearly here. Start the idle escalation over.
+    _nudges = 0;
+
+    // Cut off whatever it was saying — being poked mid-sentence should stop it,
+    // the way interrupting a person does — and clear the caption with it.
+    _voice.stop();
     _hush?.cancel();
-    String line = _pokeLines[_rng.nextInt(_pokeLines.length)];
-    if (line == _bubble) {
-      line = _pokeLines[(_pokeLines.indexOf(line) + 1) % _pokeLines.length];
+    _idleNudge?.cancel();
+    _bubbleOff?.cancel();
+    if (_greeting) setState(() => _greeting = false);
+
+    // Restart the countdown. While the tapping continues this keeps being
+    // pushed back, so the reply only lands once it stops.
+    _pokeReply?.cancel();
+    _pokeReply = Timer(_pokeReplyDelay, _replyToPoke);
+  }
+
+  /// The tapping has stopped. Say something about it.
+  void _replyToPoke() {
+    if (!mounted) return;
+    final List<SpokenLine>? spoken = _lines?.poke;
+    if (spoken != null && spoken.isNotEmpty) {
+      _say(_pickLine(spoken));
+    } else {
+      _show(_pickText(_fallbackPoke), hold: const Duration(milliseconds: 1400));
     }
-    setState(() {
-      _greeting = true;
-      _bubble = line;
-      _mood = OrbMood.speaking;
-    });
-    _hush = Timer(const Duration(milliseconds: 1400), () {
-      if (!mounted) return;
-      setState(() => _mood = OrbMood.idle);
-    });
+  }
+
+  // --- nudging an idle user -------------------------------------------------
+
+  void _scheduleNudge() {
+    _idleNudge?.cancel();
+    final Duration gap = _idleGaps[math.min(_nudges, _idleGaps.length - 1)];
+    _idleNudge = Timer(gap, _nudge);
+  }
+
+  /// Speak up after a stretch of nothing. Curious, never nagging — and the gap
+  /// before the next one grows every time.
+  void _nudge() {
+    // Not while it is already talking, and not on top of a reply that is
+    // waiting for the tapping to stop.
+    if (!mounted || _voice.speaking.value || (_pokeReply?.isActive ?? false)) {
+      return;
+    }
+    _nudges++;
+    final List<SpokenLine>? spoken = _lines?.idle;
+    if (spoken != null && spoken.isNotEmpty) {
+      _say(_pickLine(spoken));
+    } else {
+      _show(_pickText(_fallbackIdle));
+    }
+  }
+
+  // --- picking a line -------------------------------------------------------
+
+  /// The last thing it said, so it never says the same thing twice running —
+  /// which is what makes a small set of lines feel like a personality rather
+  /// than a loop.
+  String _lastSaid = '';
+
+  SpokenLine _pickLine(List<SpokenLine> from) {
+    SpokenLine choice = from[_rng.nextInt(from.length)];
+    if (from.length > 1 && choice.text == _lastSaid) {
+      choice = from[(from.indexOf(choice) + 1) % from.length];
+    }
+    _lastSaid = choice.text;
+    return choice;
+  }
+
+  String _pickText(List<String> from) {
+    String choice = from[_rng.nextInt(from.length)];
+    if (from.length > 1 && choice == _lastSaid) {
+      choice = from[(from.indexOf(choice) + 1) % from.length];
+    }
+    _lastSaid = choice;
+    return choice;
   }
 
   @override
   void dispose() {
     _greetOnce?.cancel();
-    _greetAgain?.cancel();
+    _idleNudge?.cancel();
     _hush?.cancel();
+    _bubbleOff?.cancel();
+    _pokeReply?.cancel();
     _idleFloat.dispose();
     _orb.dispose();
     _dropSound.dispose();
+    _voice.speaking.removeListener(_onSpeakingChanged);
+    _voice.dispose();
+    _greetings.dispose();
     super.dispose();
   }
 
   void _start() {
+    // Don't talk over the next screen.
+    _idleNudge?.cancel();
+    _voice.stop();
     Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (BuildContext _) => const HomePage()),
     );
@@ -213,6 +414,7 @@ class _WelcomePageState extends State<WelcomePage>
                           child: _OrbStage(
                             size: orbSize,
                             mood: _mood,
+                            amplitude: _voice.level,
                             bubble: _bubble,
                             showBubble: _greeting,
                             float: _idleFloat,
@@ -273,6 +475,7 @@ class _OrbStage extends StatelessWidget {
   const _OrbStage({
     required this.size,
     required this.mood,
+    required this.amplitude,
     required this.bubble,
     required this.showBubble,
     required this.float,
@@ -284,6 +487,12 @@ class _OrbStage extends StatelessWidget {
   /// the halo — and the widget is taller than [size] to leave hop headroom.
   final double size;
   final OrbMood mood;
+
+  /// Live loudness of the spoken greeting, 0..1 — so the orb's mouth is shaped
+  /// by the actual words. Zero when it isn't talking, which the orb reads as
+  /// "improvise nothing" and simply holds still.
+  final ValueListenable<double> amplitude;
+
   final String bubble;
   final bool showBubble;
   final Animation<double> float;
@@ -328,28 +537,44 @@ class _OrbStage extends StatelessWidget {
               ),
               Positioned(
                 top: 0,
-                child: RezolveOrb(
-                  size: size,
-                  headroom: _headroom,
-                  mood: mood,
-                  controller: controller,
-                  onTap: onPoke,
+                // Rebuilt on its own so a level arriving 20 times a second
+                // repaints the orb and nothing else on the page.
+                child: ValueListenableBuilder<double>(
+                  valueListenable: amplitude,
+                  builder: (BuildContext context, double level, _) => RezolveOrb(
+                    size: size,
+                    headroom: _headroom,
+                    mood: mood,
+                    // Null hands the orb back its own improvised rhythm, which
+                    // is what should happen when there is no audio to follow.
+                    amplitude: level > 0 ? level : null,
+                    controller: controller,
+                    onTap: onPoke,
+                  ),
                 ),
               ),
               Positioned(
                 left: 0,
                 top: size * 0.10 + t * 5,
-                child: AnimatedScale(
-                  scale: showBubble ? 1 : 0.86,
+                // Switched rather than faded to transparent: a bubble held at
+                // zero opacity is still in the tree, so a screen reader goes on
+                // announcing a caption that is no longer on screen.
+                child: AnimatedSwitcher(
                   duration: AppDurations.bubbleIn,
-                  curve: Curves.easeOutBack,
-                  alignment: Alignment.bottomRight,
-                  child: AnimatedOpacity(
-                    opacity: showBubble ? 1 : 0,
-                    duration: AppDurations.bubbleIn,
-                    curve: Curves.easeOut,
-                    child: SpeechBubble(text: bubble),
+                  switchInCurve: Curves.easeOutBack,
+                  switchOutCurve: Curves.easeOut,
+                  transitionBuilder: (Widget child, Animation<double> anim) =>
+                      FadeTransition(
+                    opacity: anim,
+                    child: ScaleTransition(
+                      scale: Tween<double>(begin: 0.86, end: 1).animate(anim),
+                      alignment: Alignment.bottomRight,
+                      child: child,
+                    ),
                   ),
+                  child: showBubble
+                      ? SpeechBubble(key: ValueKey<String>(bubble), text: bubble)
+                      : const SizedBox.shrink(),
                 ),
               ),
             ],

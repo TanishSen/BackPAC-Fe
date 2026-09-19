@@ -26,7 +26,14 @@ class SpeechBubble extends StatelessWidget {
             alignment: Alignment.centerLeft,
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 200),
-              child: Text(text, key: ValueKey<String>(text), style: AppText.bubble),
+              // Capped so a spoken greeting ("Hey! Where are we off to?")
+              // wraps to two lines instead of growing a bubble wider than the
+              // phone. Short lines still size to their text.
+              child: ConstrainedBox(
+                key: ValueKey<String>(text),
+                constraints: const BoxConstraints(maxWidth: 196),
+                child: Text(text, style: AppText.bubble),
+              ),
             ),
           ),
         ),
