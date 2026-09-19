@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../app/app_theme.dart';
 import '../../../orb/rezolve_orb.dart';
 import '../model/chat_message.dart';
+import 'trip_card_view.dart';
 
 /// One message. The user speaks in white cards on the right; the assistant
 /// speaks as plain text on the page, under its name and the time — the same
@@ -100,7 +101,11 @@ class ChatMessageView extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
               ],
-              Text(message.text, style: AppText.message),
+              if (message.text.isNotEmpty)
+                Text(message.text, style: AppText.message),
+              // Results the assistant found for this turn, under the words it
+              // said about them.
+              if (message.card != null) TripCardView(card: message.card!),
               if (message.replies.isNotEmpty) ...<Widget>[
                 const SizedBox(height: 12),
                 Wrap(
