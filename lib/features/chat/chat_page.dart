@@ -6,6 +6,7 @@ import '../../orb/rezolve_orb.dart';
 import '../conversation/conversation.dart';
 import '../conversation/demo_conversation.dart';
 import '../conversation/live_conversation.dart';
+import '../history/data/history_client.dart';
 import '../voice/voice_controller.dart' show VoiceState;
 import '../voice/widgets/mic_dock.dart';
 import 'model/chat_message.dart';
@@ -26,6 +27,7 @@ class ChatPage extends StatefulWidget {
     super.key,
     this.title = 'New trip',
     this.opener,
+    this.resumeSessionId,
     this.conversation,
     this.autoListen = false,
   });
@@ -35,6 +37,11 @@ class ChatPage extends StatefulWidget {
   /// The line that started this conversation on the home screen. It is sent as
   /// the first message so the assistant answers it rather than just greeting.
   final String? opener;
+
+  /// Continue an earlier conversation rather than starting a new one. Set by
+  /// the history list; the transcript so far is replayed into the thread and
+  /// no opener is sent.
+  final String? resumeSessionId;
 
   /// Override who is talking — tests pass a fake. Defaults to a live call when
   /// [AppConfig.liveVoice] is on, and the scripted demo otherwise.
@@ -52,10 +59,16 @@ class _ChatPageState extends State<ChatPage> {
   late final Conversation _talk = widget.conversation ?? _defaultConversation();
 
   Conversation _defaultConversation() => AppConfig.liveVoice
-      ? LiveConversation(opener: widget.opener)
+      ? LiveConversation(
+          opener: widget.opener,
+          resumeSessionId: widget.resumeSessionId,
+        )
+      // The scripted demo has no past to resume, so it ignores the id and just
+      // opens normally.
       : DemoConversation(opener: widget.opener);
 
   final ScrollController _scroll = ScrollController();
+  final HistoryClient _history = HistoryClient();
   bool _saved = false;
   bool _typingMode = false;
 
@@ -79,10 +92,106 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
+    _history.dispose();
     _talk.removeListener(_onChanged);
     _talk.dispose();
     _scroll.dispose();
     super.dispose();
+  }
+
+  /// Bookmark this conversation, or un-bookmark it.
+  ///
+  /// Flips on screen first and puts it back if the server disagrees: the tap
+  /// is on a toggle, and a toggle that waits for a round trip before moving
+  /// feels broken on a slow connection.
+  Future<void> _toggleSaved() async {
+    final String? id = _talk.sessionId;
+    if (id == null) {
+      // No session yet — the call is still connecting, or this is the scripted
+      // demo. Saying so beats a bookmark that silently does not stick.
+      _say('There is nothing to save until the conversation has started.');
+      return;
+    }
+
+    final bool next = !_saved;
+    setState(() => _saved = next);
+    try {
+      await _history.setSaved(id, next);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _saved = !next);
+      _say('Could not save that. Try again in a moment.');
+    }
+  }
+
+  /// Erase this conversation and leave the screen.
+  ///
+  /// Asks first, and says what is actually lost. Unlike saving, this is not a
+  /// toggle to be flipped optimistically — the transcript and the cards go
+  /// with it, in the database, and there is no undo to offer afterwards.
+  Future<void> _deleteConversation() async {
+    final String? id = _talk.sessionId;
+    if (id == null) {
+      _say('There is nothing to delete yet — this conversation was never '
+          'saved to your history.');
+      return;
+    }
+
+    final bool confirmed = await _confirmDelete();
+    if (!confirmed || !mounted) return;
+
+    try {
+      await _history.delete(id);
+    } catch (_) {
+      if (!mounted) return;
+      _say('Could not delete that. It is still in your history.');
+      return;
+    }
+
+    if (!mounted) return;
+    // Straight out: staying on a conversation that no longer exists would let
+    // someone carry on talking into a transcript with nowhere to go.
+    Navigator.of(context).maybePop();
+  }
+
+  Future<bool> _confirmDelete() async {
+    final bool? yes = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppSpacing.cardRadius),
+        ),
+        title: Text('Delete this conversation?', style: AppText.section),
+        content: Text(
+          'Everything said in it, and the results it found, will be gone. '
+          'This cannot be undone.',
+          style: AppText.body,
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text('Keep it',
+                style: AppText.label.copyWith(color: AppColors.muted)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text('Delete',
+                style: AppText.label.copyWith(color: const Color(0xFFC0392B))),
+          ),
+        ],
+      ),
+    );
+    return yes ?? false;
+  }
+
+  void _say(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+      ));
   }
 
   void _onChanged() {
@@ -124,7 +233,8 @@ class _ChatPageState extends State<ChatPage> {
               title: widget.title,
               saved: _saved,
               onBack: () => Navigator.of(context).maybePop(),
-              onSave: () => setState(() => _saved = !_saved),
+              onSave: _toggleSaved,
+              onDelete: _deleteConversation,
             ),
             // Failures get a banner, and so does a usable-but-degraded call
             // (a blocked microphone). Connecting is not a footnote — it is the
@@ -318,12 +428,14 @@ class _ChatBar extends StatelessWidget {
     required this.saved,
     required this.onBack,
     required this.onSave,
+    required this.onDelete,
   });
 
   final String title;
   final bool saved;
   final VoidCallback onBack;
   final VoidCallback onSave;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -362,6 +474,16 @@ class _ChatBar extends StatelessWidget {
             tooltip: saved ? 'Saved' : 'Save this trip',
             background: saved ? const Color(0xFFFFC93C) : AppColors.surface,
             foreground: saved ? Colors.white : AppColors.ink,
+          ),
+          const SizedBox(width: 8),
+          // Last, and the furthest from the back button. It is the one control
+          // here you cannot undo, so it should not sit where a thumb reaching
+          // for "back" lands.
+          _RoundButton(
+            icon: Icons.delete_outline_rounded,
+            onTap: onDelete,
+            tooltip: 'Delete this conversation',
+            foreground: const Color(0xFFC0392B),
           ),
         ],
       ),

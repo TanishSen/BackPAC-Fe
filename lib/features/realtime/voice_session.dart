@@ -161,14 +161,26 @@ class VoiceSession {
   /// Throws if the backend is down, LiveKit is unconfigured, or the agent
   /// refused — the caller decides what to show. Anything thrown here means no
   /// call is in progress.
-  Future<void> start({required String agentId, String? participantName}) async {
+  /// The session the backend gave us, once connected. Null before that.
+  ///
+  /// Carries what was said last time when this call is a resume, which the
+  /// conversation paints into the thread.
+  SessionInfo? info;
+
+  Future<void> start({
+    required String agentId,
+    String? participantName,
+    String? resumeSessionId,
+  }) async {
     lastError = null;
     _state.add(CallState.connecting);
     try {
       final info = await _backend.startSession(
         agentId: agentId,
         participantName: participantName,
+        resumeSessionId: resumeSessionId,
       );
+      this.info = info;
 
       final room = Room();
       _listener = room.createListener();

@@ -102,6 +102,140 @@ void main() {
     await tester.pump(const Duration(seconds: 4));
   });
 
+  testWidgets('a poke reply does not follow you to the home screen',
+      (WidgetTester tester) async {
+    usePhone(tester);
+    await tester.pumpWidget(const backPACApp());
+    await tester.pump(const Duration(milliseconds: 900));
+    await tester.pump(const Duration(milliseconds: 500));
+
+    // Poke it, then leave before the 650ms reply has landed.
+    await tester.tap(find.byType(RezolveOrb));
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.tap(find.text("Let's Start"));
+    // The orb never stops animating, so nothing here ever settles: step the
+    // route transition by hand instead.
+    for (int i = 0; i < 6; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    // The reply is due about now. It must not arrive on top of another screen.
+    await tester.pump(const Duration(milliseconds: 1200));
+    expect(find.byType(SpeechBubble, skipOffstage: false), findsNothing,
+        reason: 'it answered a poke you made on the screen before');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a greeting that was still on its way is dropped, not spoken',
+      (WidgetTester tester) async {
+    usePhone(tester);
+    await tester.pumpWidget(const backPACApp());
+
+    // Leave immediately — before the 700ms greeting has had its turn.
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.tap(find.text("Let's Start"));
+    for (int i = 0; i < 6; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    await tester.pump(const Duration(seconds: 2));
+    expect(find.byType(SpeechBubble, skipOffstage: false), findsNothing,
+        reason: 'the hello landed after you had already gone');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('it goes quiet for good once you leave for the home screen',
+      (WidgetTester tester) async {
+    usePhone(tester);
+    await tester.pumpWidget(const backPACApp());
+    await tester.pump(const Duration(milliseconds: 900));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('Hello!'), findsOneWidget);
+
+    await tester.tap(find.text("Let's Start"));
+    // The orb never stops animating, so nothing here ever settles: step the
+    // route transition by hand instead.
+    for (int i = 0; i < 6; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(find.byType(SpeechBubble, skipOffstage: false), findsNothing,
+        reason: 'the greeting should not follow you onto the next screen');
+
+    // Pushing does not dispose this page, so its idle countdown used to carry
+    // on behind the home screen and nudge into an empty room. Sit through the
+    // whole escalation — 3.5s, 7s, 12s, 20s, 30s — and it must stay silent.
+    // Stepped rather than one long jump so every timer in between gets to run.
+    for (int i = 0; i < 40; i++) {
+      await tester.pump(const Duration(seconds: 2));
+      expect(find.byType(SpeechBubble, skipOffstage: false), findsNothing,
+          reason: 'the orb spoke from under the home screen');
+    }
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('and speaks again when you come back to it',
+      (WidgetTester tester) async {
+    usePhone(tester);
+    await tester.pumpWidget(const backPACApp());
+    await tester.pump(const Duration(milliseconds: 900));
+    await tester.pump(const Duration(milliseconds: 500));
+
+    final NavigatorState nav = tester.state<NavigatorState>(
+      find.byType(Navigator).first,
+    );
+    await tester.tap(find.text("Let's Start"));
+    for (int i = 0; i < 6; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    nav.pop();
+    for (int i = 0; i < 6; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    // Silencing it on the way out must not silence it for ever: back on top,
+    // the idle nudges start over.
+    await tester.pump(const Duration(seconds: 4));
+    expect(find.byType(SpeechBubble), findsOneWidget,
+        reason: 'it should pipe up again once it is the screen you are on');
+    expect(tester.takeException(), isNull);
+    await tester.pump(const Duration(seconds: 4));
+  });
+
+  testWidgets('a replaced route does not wake it up again',
+      (WidgetTester tester) async {
+    usePhone(tester);
+    await tester.pumpWidget(const backPACApp());
+    await tester.pump(const Duration(milliseconds: 900));
+    await tester.pump(const Duration(milliseconds: 500));
+
+    final NavigatorState nav =
+        tester.state<NavigatorState>(find.byType(Navigator).first);
+
+    // Exactly what signing in does: push a screen, then replace it with
+    // another. The pushed route's future completes on that replacement, and
+    // waking on it is what had the orb chatting from under the home screen
+    // for the rest of the session.
+    await tester.tap(find.text("Let's Start"));
+    for (int i = 0; i < 6; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    nav.pushReplacement(MaterialPageRoute<void>(
+      builder: (BuildContext _) => const Scaffold(body: Text('replacement')),
+    ));
+    for (int i = 0; i < 6; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    // Sit through the whole idle escalation with the replacement on top.
+    for (int i = 0; i < 40; i++) {
+      await tester.pump(const Duration(seconds: 2));
+      expect(find.byType(SpeechBubble, skipOffstage: false), findsNothing,
+          reason: 'it woke up when the route above it was replaced');
+    }
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('layout survives a small phone and large system text',
       (WidgetTester tester) async {
     usePhone(tester, logical: const Size(320, 568));

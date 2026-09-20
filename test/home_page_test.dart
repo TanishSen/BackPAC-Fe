@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:backPAC/data/trip_data.dart';
 import 'package:backPAC/features/chat/chat_page.dart';
 import 'package:backPAC/features/home/home_page.dart';
 import 'package:backPAC/features/home/widgets/history_section.dart';
@@ -21,7 +22,7 @@ void main() {
   testWidgets('home shows the greeting, every travel mode and the trip ideas',
       (WidgetTester tester) async {
     usePhone(tester);
-    await tester.pumpWidget(const MaterialApp(home: HomePage()));
+    await tester.pumpWidget(MaterialApp(home: HomePage(name: 'Jasmin', loadHistory: () async => kHistory)));
     await settleEntrances(tester);
 
     expect(find.text('Hi, Jasmin'), findsOneWidget);
@@ -40,7 +41,7 @@ void main() {
   testWidgets('tapping a travel mode opens the chat already asking for it',
       (WidgetTester tester) async {
     usePhone(tester);
-    await tester.pumpWidget(const MaterialApp(home: HomePage()));
+    await tester.pumpWidget(MaterialApp(home: HomePage(name: 'Jasmin', loadHistory: () async => kHistory)));
     await settleEntrances(tester);
 
     await tester.tap(find.text('Flights').first);
@@ -61,7 +62,7 @@ void main() {
 
   testWidgets('history filters down to one mode', (WidgetTester tester) async {
     usePhone(tester);
-    await tester.pumpWidget(const MaterialApp(home: HomePage()));
+    await tester.pumpWidget(MaterialApp(home: HomePage(name: 'Jasmin', loadHistory: () async => kHistory)));
     await settleEntrances(tester);
 
     await tester.scrollUntilVisible(
@@ -76,12 +77,14 @@ void main() {
     expect(find.text('Hotel in Jaipur'), findsOneWidget);
 
     // The filter chips scroll horizontally; the last one starts offscreen.
+    // The distance has to clear every chip before Hotels — adding "Saved"
+    // to the row is what made a shorter drag stop landing on it.
     await tester.drag(
       find.descendant(
         of: find.byType(HistorySection),
         matching: find.text('All'),
       ),
-      const Offset(-220, 0),
+      const Offset(-360, 0),
     );
     await tester.pump(const Duration(milliseconds: 400));
     await tester.tap(find.descendant(

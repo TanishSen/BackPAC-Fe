@@ -63,7 +63,12 @@ class _Row extends StatelessWidget {
       TripCardKind.trains || TripCardKind.flights => (
           '${data['name'] ?? 'Option'}',
           _transitSubtitle(data),
-          _money(data['priceInr']),
+          // "~" when the price is a cached estimate rather than a live quote.
+          // Small mark, real promise: it is the difference between what we
+          // can stand behind and what someone finds at the payment page.
+          data['priceIsApproximate'] == true
+              ? _approx(_money(data['priceInr']))
+              : _money(data['priceInr']),
         ),
       TripCardKind.stays => (
           '${data['name'] ?? 'Stay'}',
@@ -117,17 +122,35 @@ class _Row extends StatelessWidget {
     );
   }
 
-  /// "06:00 → 10:35 · 4h 35m · IRCTC"
+  /// "06:00 → 10:35 · 4h 35m · non-stop · IRCTC"
+  ///
+  /// Every part is optional, because real providers answer with different
+  /// amounts of detail. The flight fare calendar gives a departure time and
+  /// no arrival, so a card that insisted on the pair showed no time at all,
+  /// and one that trusted `durationMinutes` printed a confident "0m".
   static String _transitSubtitle(Map<String, dynamic> d) {
     final String depart = _clock(d['depart']);
     final String arrive = _clock(d['arrive']);
+    final Object? mins = d['durationMinutes'];
+    final Object? stops = d['stops'];
+
     final List<String> parts = <String>[
-      if (depart.isNotEmpty && arrive.isNotEmpty) '$depart → $arrive',
-      if (d['durationMinutes'] is int) _duration(d['durationMinutes'] as int),
+      if (depart.isNotEmpty && arrive.isNotEmpty)
+        '$depart → $arrive'
+      else if (depart.isNotEmpty)
+        depart,
+      // Zero is "unknown", not "instant".
+      if (mins is int && mins > 0) _duration(mins),
+      if (stops is int) _stops(stops),
       if (d['provider'] is String) d['provider'] as String,
     ];
     return parts.join(' · ');
   }
+
+  /// "non-stop", "1 stop", "2 stops" — the difference between a good morning
+  /// and a bad one, and worth more room than the price saves.
+  static String _stops(int stops) =>
+      stops <= 0 ? 'non-stop' : (stops == 1 ? '1 stop' : '$stops stops');
 
   /// "Old City · 4.6★"
   static String _staySubtitle(Map<String, dynamic> d) {
@@ -138,14 +161,33 @@ class _Row extends StatelessWidget {
     return parts.join(' · ');
   }
 
-  /// The backend sends ISO timestamps; only the clock time is useful here.
+  /// The clock time at the airport or station, from an ISO timestamp.
+  ///
+  /// Read straight out of the string rather than through `DateTime`, and that
+  /// is the whole point. `DateTime.tryParse` turns "19:00+05:30" into a UTC
+  /// instant, and `.hour` on it is 13 — so a SpiceJet flight leaving Delhi at
+  /// seven in the evening was rendering as 13:30. The mock data never showed
+  /// it because those timestamps carried no offset; the first real provider
+  /// made every departure five and a half hours wrong.
+  ///
+  /// Travel times are always quoted in local time at the place they happen,
+  /// which is exactly what the offset in the string already encodes. There is
+  /// nothing to convert, so nothing converts.
   static String _clock(Object? iso) {
-    if (iso is! String) return '';
+    if (iso is! String || iso.isEmpty) return '';
+    final RegExpMatch? m =
+        RegExp(r'T(\d{2}):(\d{2})').firstMatch(iso);
+    if (m != null) return '${m.group(1)}:${m.group(2)}';
+
+    // No "T": not an ISO timestamp we recognise. Fall back rather than drop
+    // the time entirely — a naive local string is still readable.
     final DateTime? t = DateTime.tryParse(iso);
     if (t == null) return '';
     return '${t.hour.toString().padLeft(2, '0')}:'
         '${t.minute.toString().padLeft(2, '0')}';
   }
+
+  static String _approx(String money) => money.isEmpty ? '' : '~$money';
 
   static String _duration(int minutes) =>
       minutes < 60 ? '${minutes}m' : '${minutes ~/ 60}h ${minutes % 60}m';

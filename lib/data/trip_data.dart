@@ -113,6 +113,11 @@ const List<TripIdea> kTripIdeas = <TripIdea>[
 ];
 
 /// A past conversation, as it appears under History.
+///
+/// A view model, not a wire type: the API's shape lives in
+/// `features/history/data/history_client.dart` and is mapped into this. That
+/// keeps date formatting and "what if it has no title" out of the widgets, and
+/// lets the tile stay a dumb thing that draws four strings.
 @immutable
 class TripHistoryEntry {
   const TripHistoryEntry({
@@ -120,14 +125,76 @@ class TripHistoryEntry {
     required this.preview,
     required this.mode,
     required this.when,
+    this.id,
+    this.saved = false,
   });
 
   final String title;
   final String preview;
-  final TravelMode mode;
+
+  /// Null when the conversation never produced a result, so there is nothing
+  /// honest to put an icon on. The tile draws a neutral one.
+  final TravelMode? mode;
   final String when;
+
+  /// The backend session id. Null for the sample entries below, which are not
+  /// real conversations and cannot be resumed.
+  final String? id;
+
+  /// Bookmarked from the chat screen's save button.
+  final bool saved;
 }
 
+/// "Just now", "Yesterday", "3 days ago" — a timestamp as someone would say it.
+///
+/// Deliberately coarse. Nobody scanning a list of past conversations wants
+/// "14:32 on 18 September"; they want to know whether it was this morning or
+/// a while back. Anything older than a month gets an actual date, because by
+/// then "seven weeks ago" has stopped meaning anything.
+String humanWhen(DateTime when, {DateTime? now}) {
+  final DateTime ref = now ?? DateTime.now();
+  final Duration ago = ref.difference(when);
+
+  if (ago.inSeconds < 60) return 'Just now';
+  if (ago.inMinutes < 60) {
+    final int m = ago.inMinutes;
+    return m == 1 ? 'A minute ago' : '$m minutes ago';
+  }
+
+  // The calendar day is decided before the hour count, not after.
+  //
+  // Doing it the other way round — any gap under 24 hours reported in hours —
+  // means something said at 11pm is still "16 hours ago" at 3pm the next
+  // afternoon, which is true and useless: the reader has slept since, and what
+  // they want to know is that it was yesterday. Hours are only the right unit
+  // within the day you are still in.
+  final DateTime a = DateTime(when.year, when.month, when.day);
+  final DateTime b = DateTime(ref.year, ref.month, ref.day);
+  final int days = b.difference(a).inDays;
+
+  if (days <= 0) {
+    final int h = ago.inHours;
+    return h == 1 ? 'An hour ago' : '$h hours ago';
+  }
+  if (days == 1) return 'Yesterday';
+  if (days < 7) return '$days days ago';
+  if (days < 14) return 'Last week';
+  if (days < 31) return '${days ~/ 7} weeks ago';
+
+  const List<String> months = <String>[
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  ];
+  final String date = '${when.day} ${months[when.month - 1]}';
+  return when.year == ref.year ? date : '$date ${when.year}';
+}
+
+/// Sample conversations.
+///
+/// No longer what the app shows — the home screen loads the real thing from
+/// the API. Kept as fixtures for the widget tests and for a demo with no
+/// backend running; note that none of them carry an [TripHistoryEntry.id], so
+/// tapping one starts a new conversation rather than resuming anything.
 const List<TripHistoryEntry> kHistory = <TripHistoryEntry>[
   TripHistoryEntry(
     title: 'Hotel in Jaipur',

@@ -59,6 +59,12 @@ class DemoConversation extends ChangeNotifier implements Conversation {
   @override
   bool get canType => true;
 
+  /// Always null: the demo has no backend, so there is nothing to save to.
+  /// `implements` rather than `extends` means the interface's default does not
+  /// carry, so it is spelled out here.
+  @override
+  String? get sessionId => null;
+
   @override
   Future<void> start() async {}
 

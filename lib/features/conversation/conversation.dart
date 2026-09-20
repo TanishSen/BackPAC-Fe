@@ -61,6 +61,14 @@ abstract class Conversation extends ChangeNotifier {
   /// transport that genuinely cannot accept text can say so.
   bool get canType => true;
 
+  /// The backend id of this conversation, once there is one.
+  ///
+  /// Null until a live call has started, and always null for the scripted
+  /// demo, which has no server behind it. Anything that persists something
+  /// about the conversation — saving it, renaming it — needs this and must
+  /// cope with not having it yet.
+  String? get sessionId => null;
+
   /// Open the conversation. Safe to call once, from initState.
   Future<void> start();
 

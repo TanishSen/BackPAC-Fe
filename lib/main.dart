@@ -4,10 +4,33 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'app/app.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-void main() {
+import 'app/app.dart';
+import 'app/app_config.dart';
+
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Sign-in, before the first frame. Supabase restores a saved session from
+  // disk here, which is what makes someone who signed in last week land on the
+  // home screen rather than the login form. Awaited on purpose: deciding which
+  // screen to show needs the answer, and a frame of the wrong screen followed
+  // by a jump is worse than a few milliseconds of nothing.
+  //
+  // Both values are public — see AppConfig. The keys that are not public are
+  // not in this app and never will be.
+  try {
+    await Supabase.initialize(
+      url: AppConfig.supabaseUrl,
+      publishableKey: AppConfig.supabasePublishableKey,
+    );
+  } catch (e) {
+    // A failure here means no sign-in, not no app. The welcome screen and the
+    // orb work regardless, and the login form will say what is wrong when
+    // someone tries to use it.
+    debugPrint('[backPAC] Supabase init failed: $e');
+  }
 
   // Let the app's sounds coexist instead of evicting each other.
   //

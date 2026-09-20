@@ -43,6 +43,29 @@ class AppConfig {
     defaultValue: 'trip-planner',
   );
 
+  // --- Supabase (sign-in) ------------------------------------------------
+  //
+  // Both of these are public by design. The URL is a hostname, and the
+  // publishable key identifies the project without granting anything: what it
+  // can reach is decided by row-level security in the database, and our tables
+  // have RLS on with no policies, so it can reach none of them. The key exists
+  // to let this app call /auth/v1 — sign up, sign in, refresh — and nothing
+  // else.
+  //
+  // The secret and service_role keys are a different matter entirely: they
+  // bypass RLS. Neither belongs in an app, ever, however well hidden — anyone
+  // can read the strings out of a shipped binary.
+
+  static const String supabaseUrl = String.fromEnvironment(
+    'SUPABASE_URL',
+    defaultValue: 'https://ockqlabjqqpmkdaheetb.supabase.co',
+  );
+
+  static const String supabasePublishableKey = String.fromEnvironment(
+    'SUPABASE_PUBLISHABLE_KEY',
+    defaultValue: 'sb_publishable_nls1xSVzzpkJCGEzOE-aHA_gpThjVwP',
+  );
+
   /// True: tapping the mic opens a real voice call (backend + agent must be
   /// running). False: the built-in scripted demo, which needs no network and
   /// is what the app falls back to if a call cannot be started.

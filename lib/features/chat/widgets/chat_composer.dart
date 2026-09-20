@@ -12,13 +12,11 @@ class ChatComposer extends StatefulWidget {
     required this.onSend,
     required this.onSwitchToVoice,
     required this.enabled,
-    this.credits = 24,
   });
 
   final ValueChanged<String> onSend;
   final VoidCallback onSwitchToVoice;
   final bool enabled;
-  final int credits;
 
   @override
   State<ChatComposer> createState() => _ChatComposerState();
@@ -52,11 +50,11 @@ class _ChatComposerState extends State<ChatComposer> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.fromLTRB(
+      padding: const EdgeInsets.fromLTRB(
         AppSpacing.pageH,
         8,
         AppSpacing.pageH,
-        10 + MediaQuery.viewInsetsOf(context).bottom * 0,
+        10,
       ),
       child: SafeArea(
         top: false,
@@ -80,12 +78,7 @@ class _ChatComposerState extends State<ChatComposer> {
                 ),
                 child: Row(
                   children: <Widget>[
-                    IconButton(
-                      onPressed: widget.enabled ? () {} : null,
-                      icon: const Icon(Icons.attach_file_rounded,
-                          size: 20, color: AppColors.muted),
-                      tooltip: 'Attach',
-                    ),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: TextField(
                         controller: _text,
@@ -101,7 +94,7 @@ class _ChatComposerState extends State<ChatComposer> {
                         decoration: const InputDecoration(
                           isDense: true,
                           border: InputBorder.none,
-                          hintText: 'Message',
+                          hintText: 'Type something…',
                           hintStyle: TextStyle(
                             fontSize: 15.5,
                             color: AppColors.muted,
@@ -110,6 +103,8 @@ class _ChatComposerState extends State<ChatComposer> {
                         ),
                       ),
                     ),
+                    // Send appears only when there is something to send, and
+                    // nothing sits here otherwise.
                     ValueListenableBuilder<TextEditingValue>(
                       valueListenable: _text,
                       builder: (BuildContext context, TextEditingValue value, _) {
@@ -124,27 +119,8 @@ class _ChatComposerState extends State<ChatComposer> {
                                       size: 22, color: AppColors.brand),
                                   tooltip: 'Send',
                                 )
-                              : Padding(
-                                  key: const ValueKey<String>('credits'),
-                                  padding:
-                                      const EdgeInsets.only(right: 14, left: 6),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: <Widget>[
-                                      const Icon(Icons.auto_awesome,
-                                          size: 15, color: AppColors.brand),
-                                      const SizedBox(width: 5),
-                                      Text(
-                                        '${widget.credits}',
-                                        style: const TextStyle(
-                                          fontSize: 13.5,
-                                          fontWeight: FontWeight.w600,
-                                          color: AppColors.brand,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
+                              : const SizedBox(
+                                  key: ValueKey<String>('idle'), width: 14),
                         );
                       },
                     ),

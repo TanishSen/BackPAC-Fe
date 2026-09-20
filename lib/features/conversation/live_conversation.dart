@@ -39,6 +39,7 @@ class LiveConversation extends ChangeNotifier implements Conversation {
     BackendClient? backend,
     VoiceSession? session,
     String? opener,
+    this.resumeSessionId,
     this.agentId = AppConfig.agentId,
         // ignore: prefer_initializing_formals — a named parameter cannot
         // start with an underscore, so `this._opener` is not expressible.
@@ -50,7 +51,7 @@ class LiveConversation extends ChangeNotifier implements Conversation {
     // it connects — and should still see it if connecting fails, rather than
     // arriving at a blank screen that has quietly eaten their request.
     final String? opener = _opener?.trim();
-    if (opener != null && opener.isNotEmpty) {
+    if (opener != null && opener.isNotEmpty && resumeSessionId == null) {
       _append(ChatAuthor.user, opener);
     }
   }
@@ -61,6 +62,20 @@ class LiveConversation extends ChangeNotifier implements Conversation {
   /// The line that opened the conversation from the home screen, sent once the
   /// call is up so the agent answers it instead of just greeting.
   final String? _opener;
+
+  /// When set, this call continues that earlier conversation instead of
+  /// starting a new one: same room, same LangGraph thread, and the transcript
+  /// so far painted into the view before the first word.
+  ///
+  /// A resume never sends an opener. It used to — the history tile handed over
+  /// its preview line — and because the preview is the *last* thing said,
+  /// which is usually the agent, the app opened by saying the agent's own
+  /// words back to it as if the user had. The agent then answered the way
+  /// anyone would if a stranger repeated their last sentence at them: "I am
+  /// the front desk routing assistant, not a search tool."
+  final String? resumeSessionId;
+
+  bool get _isResume => resumeSessionId != null;
 
   late final VoiceSession _session;
 
@@ -118,6 +133,11 @@ class LiveConversation extends ChangeNotifier implements Conversation {
   @override
   bool get canType => _status == ConversationStatus.ready;
 
+  /// Resuming already knows the id; a new call learns it from the backend's
+  /// reply when the session starts.
+  @override
+  String? get sessionId => resumeSessionId ?? _session.info?.sessionId;
+
   @override
   Future<void> start() async {
     _setStatus(ConversationStatus.connecting, 'Starting a session…');
@@ -132,7 +152,13 @@ class LiveConversation extends ChangeNotifier implements Conversation {
     _session.micBlocked.addListener(notifyListeners);
 
     try {
-      await _session.start(agentId: agentId);
+      await _session.start(agentId: agentId, resumeSessionId: resumeSessionId);
+
+      // Paint what was said last time, before waiting for the agent. Someone
+      // reopening a conversation should see it immediately — the thread is
+      // already there, and making them watch a blank screen for the ten
+      // seconds the agent takes to join loses the thing they tapped for.
+      _replayHistory();
 
       // Being in the room is not the same as having someone to talk to. The
       // backend asks the agent to join before it answers us, but the agent
@@ -159,14 +185,35 @@ class LiveConversation extends ChangeNotifier implements Conversation {
       // than through send(), which would add a second copy of it. It is safe
       // now: a packet sent into a room the agent has not joined is dropped,
       // and we have just waited for exactly that.
+      // A resume has nothing to open with: the agent already knows the
+      // conversation, and anything sent here would arrive as a new thing the
+      // user just said.
       final String? opener = _opener?.trim();
-      if (opener != null && opener.isNotEmpty) {
+      if (!_isResume && opener != null && opener.isNotEmpty) {
         await _session.sendUserText(opener);
       }
     } catch (e) {
       _setStatus(ConversationStatus.failed, _friendlyError(e));
     }
   }
+
+  /// Put the earlier transcript into the thread, oldest first.
+  ///
+  /// Only ever runs once, and only for a resume: the messages already on
+  /// screen would otherwise be duplicated by a reconnect.
+  void _replayHistory() {
+    if (_replayed) return;
+    _replayed = true;
+    final List<PastMessage> past =
+        _session.info?.previousMessages ?? const <PastMessage>[];
+    if (past.isEmpty) return;
+    for (final PastMessage m in past) {
+      _append(m.isUser ? ChatAuthor.user : ChatAuthor.assistant, m.content);
+    }
+    notifyListeners();
+  }
+
+  bool _replayed = false;
 
   /// Mute and unmute. Ending the call is the back button's job, not the mic's —
   /// a tap that silently hung up would be a nasty surprise.

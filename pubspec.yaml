@@ -38,6 +38,7 @@ dependencies:
   # Real voice: join the LiveKit room the backend mints, and call the API.
   livekit_client: ^2.3.0
   http: ^1.2.2
+  supabase_flutter: ^2.17.2
 
 dev_dependencies:
   flutter_test:

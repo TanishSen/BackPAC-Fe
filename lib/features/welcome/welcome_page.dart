@@ -9,6 +9,9 @@ import 'package:flutter/services.dart';
 import '../../app/app_config.dart';
 import '../../app/app_theme.dart';
 import '../../orb/rezolve_orb.dart';
+import '../../app/app.dart' show routeObserver;
+import '../auth/auth_page.dart';
+import '../auth/data/auth_service.dart';
 import '../home/home_page.dart';
 import 'data/greeting_client.dart';
 import 'data/greeting_voice.dart';
@@ -25,7 +28,7 @@ class WelcomePage extends StatefulWidget {
 }
 
 class _WelcomePageState extends State<WelcomePage>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, RouteAware {
   /// Keeps the headline breaking into three lines rather than two long ones.
   static const double _headlineMeasure = 258;
 
@@ -85,6 +88,15 @@ class _WelcomePageState extends State<WelcomePage>
   /// the arriving audio never both greet.
   bool _hasGreeted = false;
 
+  /// Whether this screen is the one you are looking at.
+  ///
+  /// Pushing the home screen does not dispose this one — it sits alive under
+  /// the new route with its timers still ticking and its player still loaded,
+  /// so without this it carries on greeting and nudging from behind another
+  /// page. [mounted] is no help: it stays true the whole time. Everything that
+  /// speaks or schedules checks this instead.
+  bool _awake = true;
+
   /// How many times it has nudged an idle user. Drives the gaps below, and
   /// resets the moment they do anything.
   int _nudges = 0;
@@ -128,7 +140,7 @@ class _WelcomePageState extends State<WelcomePage>
   /// background, because a tap must not wait on a round trip.
   Future<void> _load() async {
     final SpokenLine? opening = await _greetings.fetchGreeting();
-    if (mounted && opening != null) {
+    if (mounted && _awake && opening != null) {
       // Straight away. The greeting is the first thing the app does, so it
       // waits on nothing but its own audio — no timer, no stagger.
       if (!_hasGreeted) _greet(opening);
@@ -154,6 +166,7 @@ class _WelcomePageState extends State<WelcomePage>
 
   /// Say a line out loud: bubble, mouth, and the level track that shapes it.
   void _say(SpokenLine line) {
+    if (!_awake) return;
     _hush?.cancel(); // the voice's own clock decides when this one ends
     _idleNudge?.cancel();
     _bubbleOff?.cancel();
@@ -168,6 +181,7 @@ class _WelcomePageState extends State<WelcomePage>
   /// Show a line without saying it — the offline path, and the stand-in while
   /// the audio is still on its way.
   void _show(String text, {Duration hold = AppDurations.greetingSpeech}) {
+    if (!_awake) return;
     _hush?.cancel();
     _idleNudge?.cancel();
     _bubbleOff?.cancel();
@@ -190,7 +204,7 @@ class _WelcomePageState extends State<WelcomePage>
   /// The orb reached the end of a spoken line: settle, land it, put the bubble
   /// away, and start counting down to the next nudge.
   void _onSpeakingChanged() {
-    if (_voice.speaking.value || !mounted) return;
+    if (_voice.speaking.value || !mounted || !_awake) return;
     setState(() => _mood = OrbMood.idle);
     _orb.play(OrbAntic.doubleHop);
     _hideBubble();
@@ -268,6 +282,7 @@ class _WelcomePageState extends State<WelcomePage>
 
   void _scheduleNudge() {
     _idleNudge?.cancel();
+    if (!_awake) return;
     final Duration gap = _idleGaps[math.min(_nudges, _idleGaps.length - 1)];
     _idleNudge = Timer(gap, _nudge);
   }
@@ -315,7 +330,23 @@ class _WelcomePageState extends State<WelcomePage>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final ModalRoute<Object?>? route = ModalRoute.of(context);
+    if (route is PageRoute) routeObserver.subscribe(this, route);
+  }
+
+  /// Something has been pushed over this screen.
+  @override
+  void didPushNext() => _goQuiet();
+
+  /// That something has been popped, and this screen is back on top.
+  @override
+  void didPopNext() => _wakeUp();
+
+  @override
   void dispose() {
+    routeObserver.unsubscribe(this);
     _greetOnce?.cancel();
     _idleNudge?.cancel();
     _hush?.cancel();
@@ -330,13 +361,65 @@ class _WelcomePageState extends State<WelcomePage>
     super.dispose();
   }
 
-  void _start() {
-    // Don't talk over the next screen.
+  /// Put this screen to sleep: the voice, every countdown, and any reply still
+  /// waiting to land.
+  ///
+  /// Cancelling the timers is not enough on its own — stopping the voice fires
+  /// [_onSpeakingChanged], which would otherwise start the next countdown
+  /// immediately — so [_awake] goes down first and holds everything shut.
+  void _goQuiet() {
+    _awake = false;
+    _greetOnce?.cancel();
     _idleNudge?.cancel();
+    _hush?.cancel();
+    _bubbleOff?.cancel();
+    _pokeReply?.cancel();
     _voice.stop();
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (BuildContext _) => const HomePage()),
-    );
+    if (mounted) {
+      setState(() {
+        _greeting = false;
+        _mood = OrbMood.idle;
+      });
+    }
+  }
+
+  /// Back on this screen after the home screen was popped: it may speak again,
+  /// starting from a fresh silence rather than mid-escalation.
+  void _wakeUp() {
+    if (!mounted) return;
+    _awake = true;
+    _nudges = 0;
+    _scheduleNudge();
+  }
+
+  void _start() {
+    // The push leaves this screen alive underneath, so silence it by hand and
+    // let it speak again only once it is back on top.
+    _goQuiet();
+
+    // Straight to the home screen if there is already a session — Supabase
+    // restores one from disk at launch, so someone who signed in last week
+    // never sees the form again. Otherwise sign in first: the history screen
+    // and starting a call both need a token the backend will accept.
+    final Widget next = AuthService().isSignedIn
+        ? const HomePage()
+        : AuthPage(
+            onSignedIn: () {
+              // Replace rather than push, so Back from the home screen does
+              // not land on a login form for an account already signed in.
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute<void>(
+                  builder: (BuildContext _) => const HomePage(),
+                ),
+              );
+            },
+          );
+
+    // No .then(_wakeUp) here. Coming back is the route observer's business —
+    // see didPopNext — because this future also fires when the pushed route is
+    // replaced, which is exactly what signing in does.
+    Navigator.of(context)
+        .push(MaterialPageRoute<void>(builder: (BuildContext _) => next));
   }
 
   @override

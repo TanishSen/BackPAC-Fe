@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:backPAC/features/voice/widgets/mic_button.dart';
 import 'package:backPAC/features/chat/chat_page.dart';
 import 'package:backPAC/features/chat/data/agent_service.dart';
 import 'package:backPAC/features/conversation/conversation.dart';
@@ -8,7 +9,6 @@ import 'package:backPAC/features/voice/voice_controller.dart' show VoiceState;
 import 'package:flutter/foundation.dart';
 import 'package:backPAC/features/chat/model/chat_message.dart';
 import 'package:backPAC/features/chat/widgets/typing_indicator.dart';
-import 'package:backPAC/features/voice/widgets/mic_button.dart';
 
 /// Pumps in small steps. One big pump renders a single frame, which leaves
 /// AnimatedSwitcher still showing the child it is transitioning away from.
@@ -67,7 +67,14 @@ Future<void> pumpChat(
 
 /// A conversation parked in one state, so the screen can be checked against it.
 class _StuckConversation extends ChangeNotifier implements Conversation {
-  _StuckConversation(this.status, this.statusMessage, {this.canType = false});
+  /// Null means "not on the server yet", which is what the scripted demo and
+  /// a still-connecting call both are. A value means the conversation exists
+  /// and can be saved or deleted.
+  @override
+  final String? sessionId;
+
+  _StuckConversation(this.status, this.statusMessage,
+      {this.canType = false, this.sessionId});
 
   @override
   final ConversationStatus status;
@@ -97,6 +104,7 @@ class _StuckConversation extends ChangeNotifier implements Conversation {
 }
 
 void main() {
+
   testWidgets('while connecting the screen says so, and does not invite talking',
       (WidgetTester tester) async {
     usePhone(tester);
@@ -246,5 +254,83 @@ void main() {
     await pumpFor(tester, 600);
 
     expect(find.text('Tap to interrupt'), findsNothing);
+  });
+
+  testWidgets('deleting asks first, and a refusal changes nothing',
+      (WidgetTester tester) async {
+    usePhone(tester);
+    await tester.pumpWidget(MaterialApp(
+      home: ChatPage(
+        title: 'Goa',
+        conversation: _StuckConversation(
+          ConversationStatus.ready,
+          null,
+          sessionId: 'a-real-session',
+        ),
+      ),
+    ));
+    await tester.pump(const Duration(milliseconds: 200));
+
+    await tester.tap(find.byIcon(Icons.delete_outline_rounded));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    // It says what is actually lost, rather than "Are you sure?".
+    expect(find.textContaining('cannot be undone'), findsOneWidget);
+
+    await tester.tap(find.text('Keep it'));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    // Still here.
+    expect(find.byType(ChatPage), findsOneWidget);
+    expect(find.textContaining('cannot be undone'), findsNothing);
+  });
+
+  // The scripted demo has no backend behind it, so `sessionId` is null — the
+  // same state a live call is in before it has connected. Both header buttons
+  // have to say so rather than appear to work. One test each: they share a
+  // snackbar, and a second message replaces the first.
+  testWidgets('saving is refused until the conversation exists',
+      (WidgetTester tester) async {
+    await pumpChat(tester);
+
+    await tester.tap(find.byIcon(Icons.bookmark_border_rounded));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.textContaining('nothing to save'), findsOneWidget);
+    // Still unsaved — the icon did not change behind the message.
+    expect(find.byIcon(Icons.bookmark_rounded), findsNothing);
+    await tester.pump(const Duration(seconds: 5));
+  });
+
+  testWidgets('deleting is refused until the conversation exists',
+      (WidgetTester tester) async {
+    await pumpChat(tester);
+
+    await tester.tap(find.byIcon(Icons.delete_outline_rounded));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.textContaining('nothing to delete'), findsOneWidget);
+    // Straight to an explanation — no confirmation for something that cannot
+    // happen.
+    expect(find.textContaining('cannot be undone'), findsNothing);
+    await tester.pump(const Duration(seconds: 5));
+  });
+
+  testWidgets('the delete button sits away from the back button',
+      (WidgetTester tester) async {
+    await pumpChat(tester);
+
+    final double back =
+        tester.getCenter(find.byIcon(Icons.arrow_back_rounded)).dx;
+    final double del =
+        tester.getCenter(find.byIcon(Icons.delete_outline_rounded)).dx;
+    final double save =
+        tester.getCenter(find.byIcon(Icons.bookmark_border_rounded)).dx;
+
+    // Back on the left, then save, then delete furthest away: the one control
+    // here that cannot be undone should not be where a thumb reaching for
+    // "back" lands.
+    expect(back, lessThan(save));
+    expect(save, lessThan(del));
   });
 }
