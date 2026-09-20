@@ -12,6 +12,18 @@
 		<string>audio</string>
 		<string>voip</string>
 	</array>
+	<!-- iOS 14+ gates any connection to a device on the same Wi-Fi behind this
+	     prompt. Without the key the request fails with no explanation, which
+	     looks exactly like the backend being down. Needed whenever BACKEND_URL
+	     is a LAN address rather than localhost. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>backPAC connects to your trip-planning server on this network.</string>
+	<!-- Declared so the local-network prompt appears for plain HTTP services.
+	     Harmless when the backend is reached by IP rather than discovered. -->
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_http._tcp</string>
+	</array>
 	<!-- Development only: the local backend is plain HTTP. Remove this block
 	     once the app points at an HTTPS backend. -->
 	<key>NSAppTransportSecurity</key>

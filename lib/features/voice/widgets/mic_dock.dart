@@ -49,8 +49,15 @@ class MicDock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // The dock deliberately runs to the very bottom of the screen so its bloom
+    // is not cut off by a white strip — the chat wraps it in SafeArea(bottom:
+    // false) for that reason. The button then has to keep clear of the system
+    // gesture bar itself, or on a gesture-navigation phone it ends up sitting
+    // in the swipe-up area.
+    final double systemInset = MediaQuery.paddingOf(context).bottom;
+
     return SizedBox(
-      height: auraHeight,
+      height: auraHeight + systemInset,
       child: Stack(
         alignment: Alignment.bottomCenter,
         children: <Widget>[
@@ -103,19 +110,26 @@ class MicDock extends StatelessWidget {
             ),
           ],
           Positioned.fill(
-            child: VoiceAura(state: state, level: level, height: auraHeight),
+            child: VoiceAura(
+              state: state,
+              level: level,
+              height: auraHeight + systemInset,
+            ),
           ),
           Positioned(
             left: 0,
             right: 0,
-            // Was 18 when the caption sat above the button; the caption is
-            // below it now and needs the clearance instead.
-            bottom: 10,
+            // The button is the bottom-most thing in the dock and sits low,
+            // with the caption stacked above it — the arrangement in the
+            // wireframe. MicButton draws itself inside a box 2.15x its own
+            // width, so a negative offset here still leaves the visible circle
+            // well inside the dock; it is trimming that invisible padding.
+            bottom: systemInset - 10,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                MicButton(state: state, level: level, onTap: onTap),
                 if (showTranscript) IgnorePointer(child: _caption(context)),
+                MicButton(state: state, level: level, onTap: onTap),
               ],
             ),
           ),
@@ -136,8 +150,7 @@ class MicDock extends StatelessWidget {
         state == VoiceState.listening && partial.isNotEmpty;
 
     return Padding(
-      // Sits under the mic now, so the breathing room moves to the top.
-      padding: const EdgeInsets.fromLTRB(28, 14, 28, 0),
+      padding: const EdgeInsets.fromLTRB(28, 0, 28, 6),
       child: AnimatedSize(
         duration: const Duration(milliseconds: 220),
         curve: Curves.easeOutCubic,
@@ -150,34 +163,25 @@ class MicDock extends StatelessWidget {
           duration: const Duration(milliseconds: 280),
           switchOutCurve: const Interval(0, 0.5, curve: Curves.easeOut),
           switchInCurve: const Interval(0.5, 1, curve: Curves.easeIn),
-          child: Container(
+          // Bare text. It used to sit in a white pill, which reads as a
+          // control you could press rather than a label for the one below it;
+          // the dock already has its own bloom of colour to lift the words off
+          // the page, so the card was doing nothing but adding an edge.
+          child: ConstrainedBox(
             key: ValueKey<String>(text),
             constraints: const BoxConstraints(maxWidth: 320),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: BoxDecoration(
-              color: isTranscript
-                  ? AppColors.surface
-                  : AppColors.surface.withValues(alpha: 0.72),
-              borderRadius: BorderRadius.circular(18),
-              boxShadow: isTranscript
-                  ? const <BoxShadow>[
-                      BoxShadow(
-                        color: Color(0x142A2140),
-                        blurRadius: 18,
-                        offset: Offset(0, 6),
-                      ),
-                    ]
-                  : const <BoxShadow>[],
-            ),
             child: Text(
               text,
               textAlign: TextAlign.center,
               maxLines: 3,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                fontSize: isTranscript ? 15.5 : 14,
+                // A live transcript is the user's own words, so it gets the
+                // darker, slightly larger treatment; everything else is a
+                // quiet status line.
+                fontSize: isTranscript ? 16 : 15,
                 height: 1.35,
-                fontWeight: isTranscript ? FontWeight.w500 : FontWeight.w500,
+                fontWeight: FontWeight.w500,
                 letterSpacing: -0.2,
                 color: isTranscript ? AppColors.ink : AppColors.inkSoft,
               ),

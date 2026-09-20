@@ -126,9 +126,10 @@ class _ChatPageState extends State<ChatPage> {
               onBack: () => Navigator.of(context).maybePop(),
               onSave: () => setState(() => _saved = !_saved),
             ),
-            // Only failures get a banner. Connecting is not a footnote — it
-            // is the whole screen, below.
-            if (_talk.status == ConversationStatus.failed &&
+            // Failures get a banner, and so does a usable-but-degraded call
+            // (a blocked microphone). Connecting is not a footnote — it is the
+            // whole screen, below.
+            if (_talk.status != ConversationStatus.connecting &&
                 _talk.statusMessage != null)
               _StatusBanner(message: _talk.statusMessage!),
             Expanded(
@@ -191,7 +192,9 @@ class _ChatPageState extends State<ChatPage> {
                   if (!_typingMode)
                     Positioned(
                       left: AppSpacing.pageH,
-                      bottom: 34,
+                      // Level with the mic circle, as in the wireframe, rather
+                      // than up beside the caption — and above the gesture bar.
+                      bottom: 26 + MediaQuery.paddingOf(context).bottom,
                       child: _SmallRound(
                         icon: Icons.keyboard_alt_outlined,
                         tooltip: 'Type instead',

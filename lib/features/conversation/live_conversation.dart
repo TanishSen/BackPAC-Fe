@@ -129,6 +129,7 @@ class LiveConversation extends ChangeNotifier implements Conversation {
     // either has to rebuild it.
     _session.talker.addListener(notifyListeners);
     _session.micEnabled.addListener(notifyListeners);
+    _session.micBlocked.addListener(notifyListeners);
 
     try {
       await _session.start(agentId: agentId);
@@ -149,7 +150,10 @@ class LiveConversation extends ChangeNotifier implements Conversation {
         return;
       }
 
-      _setStatus(ConversationStatus.ready, null);
+      _setStatus(
+        ConversationStatus.ready,
+        _session.micBlocked.value ? _micBlockedMessage : null,
+      );
 
       // Now deliver the opener that is already on screen. Sent directly rather
       // than through send(), which would add a second copy of it. It is safe
@@ -172,7 +176,19 @@ class LiveConversation extends ChangeNotifier implements Conversation {
   Future<void> onMicTap() async {
     if (_status != ConversationStatus.ready) return;
     await _session.toggleMic();
+    // Tapping is also how someone retries after granting the permission, so
+    // the message clears itself the moment the microphone actually opens.
+    _setStatus(
+      ConversationStatus.ready,
+      _session.micBlocked.value ? _micBlockedMessage : null,
+    );
   }
+
+  /// Actionable, because "try again" is not: nothing the app does will change
+  /// a denied permission.
+  static const String _micBlockedMessage =
+      'Microphone blocked. Allow it in Settings, then tap the mic — '
+      'or type instead.';
 
   /// Typed input. It reaches the agent over the data channel and starts exactly
   /// the same turn a spoken sentence would — see the agent's text_input.py.
@@ -316,6 +332,7 @@ class LiveConversation extends ChangeNotifier implements Conversation {
     }
     _session.talker.removeListener(notifyListeners);
     _session.micEnabled.removeListener(notifyListeners);
+    _session.micBlocked.removeListener(notifyListeners);
     _session.dispose();
     _backend.dispose();
     super.dispose();

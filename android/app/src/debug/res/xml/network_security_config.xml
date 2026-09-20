@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DEBUG BUILDS ONLY. The release build uses src/main/res/xml of the same name,
+  which allows cleartext to the local dev hosts and nothing else.
+
+  A debug build gets a blanket allowance because a developer's backend could be
+  anywhere: an emulator reaching the host at 10.0.2.2, a phone on the same
+  Wi-Fi reaching 192.168.x.x, a tunnel, a colleague's laptop. Enumerating those
+  in advance is impossible, and the failure when you get it wrong is silent —
+  the request is blocked by the platform before it leaves the device, so the
+  app just looks broken.
+
+  This file is never in a release APK: Gradle only merges src/debug for the
+  debug variant.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

@@ -111,8 +111,30 @@ class VoiceSession {
   /// change, including ones we did not make.
   final ValueNotifier<bool> micEnabled = ValueNotifier<bool>(false);
 
+  /// True when the platform refused the microphone — permission denied, or no
+  /// usable capture device.
+  ///
+  /// Kept separate from a general failure because the remedy is completely
+  /// different: nothing about retrying or checking your connection helps, the
+  /// user has to grant the permission. The call itself carries on without it.
+  final ValueNotifier<bool> micBlocked = ValueNotifier<bool>(false);
+
   /// True while a mute/unmute is in flight.
   bool _micBusy = false;
+
+  /// Does this failure look like the user (or the OS) saying no?
+  ///
+  /// Matched on the message rather than the type: LiveKit wraps the platform
+  /// error in a TrackCreateException, and the useful distinction — refused
+  /// versus broken — only survives in the text underneath.
+  static bool _isPermissionDenial(Object error) {
+    final String text = error.toString().toLowerCase();
+    return text.contains('notallowed') ||
+        text.contains('not allowed') ||
+        text.contains('permission') ||
+        text.contains('denied') ||
+        text.contains('notfound');
+  }
 
   /// What the last tap asked for, if it arrived while one was in flight.
   ///
@@ -162,11 +184,23 @@ class VoiceSession {
       // speaker, and an open mic hears it, which is how the assistant ends up
       // transcribing itself.
       final LocalParticipant? me = room.localParticipant;
-      await me?.setMicrophoneEnabled(true);
-      await me?.setMicrophoneEnabled(false);
+      try {
+        await me?.setMicrophoneEnabled(true);
+        await me?.setMicrophoneEnabled(false);
+        micBlocked.value = false;
+      } catch (e) {
+        // Deliberately not fatal. Refusing the microphone should cost you the
+        // microphone, not the conversation: the agent still joins and greets,
+        // the transcript still arrives, and the keyboard still works. Failing
+        // the whole call here reported it as "couldn't reach the assistant",
+        // which is both wrong and unactionable.
+        micBlocked.value = true;
+        lastError = e.toString();
+        debugPrint('[backPAC] microphone unavailable, continuing muted: $e');
+      }
 
       _room = room;
-      micEnabled.value = false; // we just muted it, above
+      micEnabled.value = false; // muted, whether by us or by the refusal
       // The agent may already have been in the room when we connected, in
       // which case no event is coming and we would wait forever.
       if (room.remoteParticipants.isNotEmpty) _markAgentPresent(true);
@@ -320,8 +354,10 @@ class VoiceSession {
       // a button that contradicts the server is worse than no button.
       // TrackMuted/TrackUnmuted below are the authority and will correct this.
       micEnabled.value = enabled;
+      micBlocked.value = false;
     } catch (e) {
       lastError = e.toString();
+      if (_isPermissionDenial(e)) micBlocked.value = true;
     } finally {
       _micBusy = false;
     }
@@ -378,6 +414,7 @@ class VoiceSession {
     level.dispose();
     talker.dispose();
     micEnabled.dispose();
+    micBlocked.dispose();
     _transcript.close();
     _cards.close();
     _state.close();

@@ -51,8 +51,12 @@ class GreetingVoice {
       await _player.stop();
       await _player.play(UrlSource(line.audioUrl));
       pendingAudio = null;
-    } catch (_) {
-      // Almost always the browser's autoplay policy. Keep the animation.
+    } catch (e) {
+      // Usually the browser's autoplay policy, which is expected and harmless.
+      // Anything else is a real failure worth seeing — swallowing it silently
+      // is how an Android audio-focus problem went unnoticed while the orb
+      // mouthed along to nothing.
+      debugPrint('[backPAC] could not play "${line.text}": $e');
       pendingAudio = line;
     }
 
@@ -90,8 +94,8 @@ class GreetingVoice {
     try {
       await _player.stop();
       await _player.play(UrlSource(blocked.audioUrl));
-    } catch (_) {
-      // Still blocked. Not worth telling anyone about.
+    } catch (e) {
+      debugPrint('[backPAC] retry still blocked: $e');
     }
   }
 

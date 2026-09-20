@@ -67,7 +67,7 @@ Future<void> pumpChat(
 
 /// A conversation parked in one state, so the screen can be checked against it.
 class _StuckConversation extends ChangeNotifier implements Conversation {
-  _StuckConversation(this.status, this.statusMessage);
+  _StuckConversation(this.status, this.statusMessage, {this.canType = false});
 
   @override
   final ConversationStatus status;
@@ -85,7 +85,7 @@ class _StuckConversation extends ChangeNotifier implements Conversation {
   @override
   String get partial => '';
   @override
-  bool get canType => false;
+  final bool canType;
   @override
   Future<void> start() async {}
   @override
@@ -118,6 +118,28 @@ void main() {
     expect(find.text('Listening…'), findsNothing);
     expect(find.text('Thinking…'), findsNothing,
         reason: 'the dock caption should be the connecting message, not this');
+  });
+
+  testWidgets('a blocked microphone is explained, and the call stays usable',
+      (WidgetTester tester) async {
+    usePhone(tester);
+    await tester.pumpWidget(MaterialApp(
+      home: ChatPage(
+        title: 'Goa',
+        conversation: _StuckConversation(
+          ConversationStatus.ready,
+          'Microphone blocked. Allow it in Settings, then tap the mic — '
+          'or type instead.',
+          canType: true,
+        ),
+      ),
+    ));
+    await tester.pump(const Duration(milliseconds: 200));
+
+    // Says what to do about it, rather than blaming the network.
+    expect(find.textContaining('Microphone blocked'), findsOneWidget);
+    // And the call is still a call: the keyboard is still offered.
+    expect(find.byIcon(Icons.keyboard_alt_outlined), findsOneWidget);
   });
 
   testWidgets('a failed connection explains itself', (WidgetTester tester) async {
