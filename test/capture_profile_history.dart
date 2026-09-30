@@ -38,20 +38,22 @@ class _Sells extends PremiumService {
   /// Real offers need the store; the screen only needs their shape. Prices are
   /// what the store would format for India.
   @override
-  Future<List<PlanOffer>> offers() async => <PlanOffer>[
-        _offer(PlanTerm.monthly, PackageType.monthly, '₹199.00', 199),
-        _offer(PlanTerm.threeMonths, PackageType.threeMonth, '₹499.00', 499),
-        _offer(PlanTerm.yearly, PackageType.annual, '₹1,499.00', 1499),
-      ];
+  Future<Paywall> paywall() async => Paywall(offers: <PlanOffer>[
+        _offer(PlanTerm.monthly, PackageType.monthly, 199),
+        _offer(PlanTerm.threeMonths, PackageType.threeMonth, 499, save: 16),
+        _offer(PlanTerm.yearly, PackageType.annual, 1499, save: 37),
+      ]);
 
-  static PlanOffer _offer(PlanTerm term, PackageType type, String price, double amount) =>
+  static PlanOffer _offer(PlanTerm term, PackageType type, double amount, {int? save}) =>
       PlanOffer(
         term: term,
-        price: price,
+        amount: amount,
+        savePercent: save,
+        price: PremiumService.displayPrice(amount, 'INR', fallback: '₹$amount'),
         package: Package(
-          term.name,
+          term.packageId,
           type,
-          StoreProduct(term.name, '', term.label, amount, price, 'INR'),
+          StoreProduct(term.name, '', term.label, amount, '₹$amount', 'INR'),
           const PresentedOfferingContext('default', null, null),
         ),
       );

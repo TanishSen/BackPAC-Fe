@@ -93,6 +93,9 @@ class _StuckConversation extends ChangeNotifier implements Conversation {
   String get partial => '';
   @override
   final bool canType;
+
+  @override
+  bool get needsUpgrade => false;
   @override
   Future<void> start() async {}
   @override

@@ -65,6 +65,10 @@ class DemoConversation extends ChangeNotifier implements Conversation {
   @override
   String? get sessionId => null;
 
+  /// The demo has no allowance to run out of.
+  @override
+  bool get needsUpgrade => false;
+
   @override
   Future<void> start() async {}
 

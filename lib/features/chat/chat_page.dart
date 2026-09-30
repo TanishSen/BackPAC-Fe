@@ -2,11 +2,15 @@ import 'package:flutter/material.dart';
 
 import '../../app/app_config.dart';
 import '../../app/app_theme.dart';
+import '../../app/transitions.dart';
 import '../../orb/rezolve_orb.dart';
 import '../conversation/conversation.dart';
 import '../conversation/demo_conversation.dart';
 import '../conversation/live_conversation.dart';
 import '../history/data/history_client.dart';
+import '../premium/premium_service.dart';
+import '../premium/upgrade_page.dart';
+import '../profile/data/profile_client.dart';
 import '../voice/voice_controller.dart' show VoiceState;
 import '../voice/widgets/mic_dock.dart';
 import 'model/chat_message.dart';
@@ -218,6 +222,26 @@ class _ChatPageState extends State<ChatPage> {
     });
   }
 
+  /// Out of free plans: Premium, right here. Bought, the same request opens
+  /// again as a fresh call, so nobody has to retype what they asked for.
+  Future<void> _upgrade() async {
+    final ProfileClient client = ProfileClient();
+    final bool? bought = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => UpgradePage(premium: PremiumService.instance, client: client),
+      ),
+    );
+    client.dispose();
+    if (bought != true || !mounted) return;
+    Navigator.of(context).pushReplacement(SlideUpRoute<void>(
+      page: ChatPage(
+        title: widget.title,
+        opener: widget.opener,
+        resumeSessionId: widget.resumeSessionId,
+      ),
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
     final List<ChatMessage> messages = _talk.messages;
@@ -246,7 +270,12 @@ class _ChatPageState extends State<ChatPage> {
             // whole screen, below.
             if (_talk.status != ConversationStatus.connecting &&
                 _talk.statusMessage != null)
-              _StatusBanner(message: _talk.statusMessage!),
+              _StatusBanner(
+                message: _talk.statusMessage!,
+                onUpgrade: _talk.needsUpgrade && PremiumService.instance.canSell
+                    ? _upgrade
+                    : null,
+              ),
             Expanded(
               child: Stack(
                 children: <Widget>[
@@ -355,9 +384,12 @@ class _ChatPageState extends State<ChatPage> {
 /// A line across the top when something has gone wrong. Connecting has its own
 /// full-width state in the middle of the screen; this is only for failures.
 class _StatusBanner extends StatelessWidget {
-  const _StatusBanner({required this.message});
+  const _StatusBanner({required this.message, this.onUpgrade});
 
   final String message;
+
+  /// Shown as "See Premium" when the failure is the free allowance.
+  final VoidCallback? onUpgrade;
   static const bool failed = true;
 
   @override
@@ -389,6 +421,20 @@ class _StatusBanner extends StatelessWidget {
               ),
             ),
           ),
+          if (onUpgrade != null) ...<Widget>[
+            const SizedBox(width: 8),
+            FilledButton(
+              onPressed: onUpgrade,
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF7B2FF7),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                minimumSize: const Size(0, 34),
+                shape: const StadiumBorder(),
+                textStyle: AppText.label.copyWith(fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+              child: const Text('See Premium'),
+            ),
+          ],
         ],
       ),
     );

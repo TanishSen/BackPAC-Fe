@@ -57,6 +57,11 @@ abstract class Conversation extends ChangeNotifier {
   /// (connecting, or why it failed). Null when there is nothing to say.
   String? get statusMessage;
 
+  /// True when the call could not start because the free plan's monthly
+  /// allowance is used up — the moment to offer Premium, right where it is
+  /// wanted.
+  bool get needsUpgrade => false;
+
   /// True when typing is possible. Always true here; it exists so a future
   /// transport that genuinely cannot accept text can say so.
   bool get canType => true;

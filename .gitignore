@@ -58,3 +58,6 @@ android/key.properties
 **/GoogleService-Info.plist
 *.p12
 *.pem
+
+# Local build settings (RevenueCat Test Store key, etc.). Never committed.
+dart_defines.local.json

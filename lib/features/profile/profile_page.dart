@@ -14,6 +14,7 @@ import '../history/data/history_client.dart';
 import '../history/history_page.dart';
 import '../home/home_page.dart';
 import '../premium/premium_service.dart';
+import '../premium/redeem_code.dart';
 import '../premium/upgrade_page.dart';
 import '../welcome/welcome_page.dart';
 import 'bucket_list_page.dart';
@@ -52,12 +53,36 @@ class _ProfilePageState extends State<ProfilePage> {
   void initState() {
     super.initState();
     unawaited(_load());
+    _premium.isPremium.addListener(_onPremium);
+  }
+
+  void _onPremium() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    _premium.isPremium.removeListener(_onPremium);
     if (widget.client == null) _client.dispose();
     super.dispose();
+  }
+
+  /// Premium by either account: the backend's copy, or RevenueCat on this
+  /// device — which knows the instant a purchase lands.
+  bool get _isPremium => (_me?.plan.premium ?? false) || _premium.isPremium.value;
+
+  /// "Contact support" — flagged priority for Premium members, which is the
+  /// Priority Support perk: their mail is answered first.
+  Future<void> _contactSupport() async {
+    final String subject = _isPremium ? '[Priority] backPAC Premium support' : 'backPAC support';
+    final Uri mail = Uri(
+      scheme: 'mailto',
+      path: AppConfig.supportEmail,
+      query: 'subject=${Uri.encodeComponent(subject)}',
+    );
+    if (!await launchUrl(mail)) {
+      _toast('Write to us at ${AppConfig.supportEmail}');
+    }
   }
 
   Future<void> _load() async {
@@ -144,7 +169,6 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> _openSettings() async {
-    final PlanInfo plan = _me?.plan ?? PlanInfo.unknown;
     final String? choice = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: AppColors.surface,
@@ -162,7 +186,7 @@ class _ProfilePageState extends State<ProfilePage> {
             if (_premium.available) ...<Widget>[
               _SheetItem(Icons.restore_rounded, 'Restore purchases',
                   () => Navigator.of(sheet).pop('restore')),
-              if (plan.premium)
+              if (_isPremium)
                 _SheetItem(Icons.credit_card_rounded, 'Manage subscription',
                     () => Navigator.of(sheet).pop('manage')),
             ],
@@ -172,6 +196,14 @@ class _ProfilePageState extends State<ProfilePage> {
             if (AppConfig.termsUrl.isNotEmpty)
               _SheetItem(Icons.description_outlined, 'Terms of use',
                   () => Navigator.of(sheet).pop('terms')),
+            if (!_isPremium)
+              _SheetItem(Icons.redeem_rounded, 'Redeem promo code',
+                  () => Navigator.of(sheet).pop('redeem')),
+            _SheetItem(
+              Icons.support_agent_rounded,
+              _isPremium ? 'Priority support' : 'Contact support',
+              () => Navigator.of(sheet).pop('support'),
+            ),
             _SheetItem(Icons.delete_forever_rounded, 'Delete account',
                 () => Navigator.of(sheet).pop('delete'),
                 color: _danger),
@@ -192,6 +224,18 @@ class _ProfilePageState extends State<ProfilePage> {
         await _open(AppConfig.privacyUrl);
       case 'terms':
         await _open(AppConfig.termsUrl);
+      case 'redeem':
+        final PlanInfo? plan = await redeemPromoCode(
+          context,
+          client: _client,
+          premium: _premium,
+        );
+        if (plan != null) {
+          await _load();
+          _toast('Premium unlocked 👑 Enjoy!');
+        }
+      case 'support':
+        await _contactSupport();
       case 'delete':
         await _deleteAccount();
     }
@@ -237,7 +281,7 @@ class _ProfilePageState extends State<ProfilePage> {
         content: Text(
           'This permanently erases your profile, conversations, groups and '
           'bucket list, and closes your account. It cannot be undone.'
-          '${_me?.plan.premium == true ? '\n\nThis does not cancel your Premium subscription — cancel it in your App Store or Google Play settings first.' : ''}',
+          '${_isPremium ? '\n\nThis does not cancel your Premium subscription — cancel it in your App Store or Google Play settings first.' : ''}',
           style: AppText.body,
         ),
         actions: <Widget>[
@@ -291,7 +335,10 @@ class _ProfilePageState extends State<ProfilePage> {
     final MediaQueryData media = MediaQuery.of(context);
     final Me me = _me ?? const Me();
     final PlanInfo plan = me.plan;
-    final bool canUpgrade = plan.billingEnabled && !plan.premium && _premium.canSell;
+    final bool premium = _isPremium;
+    // Premium's perks stand on their own, so it is offered wherever it can be
+    // sold — not only once the backend's free allowance is switched on.
+    final bool canUpgrade = !premium && _premium.canSell;
 
     return Scaffold(
       backgroundColor: AppColors.canvas,
@@ -341,6 +388,7 @@ class _ProfilePageState extends State<ProfilePage> {
                       profile: me.profile,
                       stats: me.stats,
                       loading: _me == null && _error == null,
+                      premium: premium,
                       onEdit: _editProfile,
                       onViewAll: () => _history('History', HistoryFilter.all),
                     ),
@@ -409,7 +457,7 @@ class _ProfilePageState extends State<ProfilePage> {
                         ),
                       ],
                     ),
-                    if (plan.premium) ...<Widget>[
+                    if (premium) ...<Widget>[
                       const SizedBox(height: 18),
                       _PremiumActive(plan: plan, onManage: _premium.available ? _manage : null),
                     ] else if (canUpgrade) ...<Widget>[
@@ -552,12 +600,14 @@ class _ProfileCard extends StatelessWidget {
     required this.loading,
     required this.onEdit,
     required this.onViewAll,
+    this.premium = false,
   });
 
   final String name;
   final Profile profile;
   final JourneyStats stats;
   final bool loading;
+  final bool premium;
   final VoidCallback onEdit;
   final VoidCallback onViewAll;
 
@@ -647,7 +697,7 @@ class _ProfileCard extends StatelessWidget {
           top: 0,
           left: 0,
           right: 0,
-          child: Center(child: _Avatar(emoji: profile.avatar, size: _avatar, onEdit: onEdit)),
+          child: Center(child: _Avatar(emoji: profile.avatar, size: _avatar, onEdit: onEdit, premium: premium)),
         ),
       ],
     );
@@ -655,8 +705,15 @@ class _ProfileCard extends StatelessWidget {
 }
 
 class _Avatar extends StatelessWidget {
-  const _Avatar({required this.emoji, required this.size, required this.onEdit});
+  const _Avatar({
+    required this.emoji,
+    required this.size,
+    required this.onEdit,
+    this.premium = false,
+  });
 
+  /// The VIP badge perk: a crown on the avatar.
+  final bool premium;
   final String? emoji;
   final double size;
   final VoidCallback onEdit;
@@ -696,6 +753,13 @@ class _Avatar extends StatelessWidget {
                       : Text(emoji!, style: TextStyle(fontSize: size * 0.48)),
                 ),
               ),
+              if (premium)
+                const Positioned(
+                  top: -18,
+                  left: 0,
+                  right: 0,
+                  child: Center(child: Text('👑', style: TextStyle(fontSize: 30))),
+                ),
               Positioned(
                 right: 2,
                 bottom: 2,

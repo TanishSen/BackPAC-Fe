@@ -79,10 +79,16 @@ class _HomePageState extends State<HomePage> {
     super.initState();
     unawaited(_refreshHistory());
     unawaited(_refreshPlan());
+    PremiumService.instance.isPremium.addListener(_onPremium);
+  }
+
+  void _onPremium() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    PremiumService.instance.isPremium.removeListener(_onPremium);
     _idleLevel.dispose();
     _history?.dispose();
     _profile.dispose();
@@ -100,15 +106,21 @@ class _HomePageState extends State<HomePage> {
 
   /// "3 plans left this month", "Premium", or nothing while Premium is not
   /// for sale.
+  /// Premium by either account: the backend's copy, or RevenueCat on this
+  /// device — which knows the instant a purchase lands.
+  bool get _premium => _plan.premium || PremiumService.instance.isPremium.value;
+
   String? get _planBadge {
-    if (_plan.premium) return 'Premium';
+    if (_premium) return 'Premium';
     final int? left = _plan.remainingThisMonth;
     if (!_plan.billingEnabled || left == null) return null;
     return left == 1 ? '1 plan left this month' : '$left plans left this month';
   }
 
-  bool get _canUpgrade =>
-      _plan.billingEnabled && !_plan.premium && PremiumService.instance.canSell;
+  /// Premium's perks stand on their own (insider tips, priority support), so
+  /// it is offered wherever it can be sold — not only once the free
+  /// allowance is switched on.
+  bool get _canUpgrade => !_premium && PremiumService.instance.canSell;
 
   Future<void> _openUpgrade() async {
     final bool? bought = await Navigator.of(context).push<bool>(

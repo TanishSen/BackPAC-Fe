@@ -175,6 +175,12 @@ class ProfileClient {
   Future<PlanInfo> syncPlan() async => PlanInfo.fromJson(
       await _api.post('/api/v1/billing/sync') as Map<String, dynamic>);
 
+  /// Unlock Premium with a promo code. Throws [ApiException] with a message
+  /// written for a person when the code is wrong or used up.
+  Future<PlanInfo> redeem(String code) async => PlanInfo.fromJson(
+      await _api.post('/api/v1/billing/redeem', body: <String, String>{'code': code.trim()})
+          as Map<String, dynamic>);
+
   // --- bucket list (the backend's saved trips) --------------------------------
 
   Future<List<BucketItem>> bucketList() async {

@@ -194,9 +194,15 @@ class LiveConversation extends ChangeNotifier implements Conversation {
         await _session.sendUserText(opener);
       }
     } catch (e) {
+      _needsUpgrade = e.toString().contains('(402)');
       _setStatus(ConversationStatus.failed, _friendlyError(e));
     }
   }
+
+  bool _needsUpgrade = false;
+
+  @override
+  bool get needsUpgrade => _needsUpgrade;
 
   /// Put the earlier transcript into the thread, oldest first.
   ///

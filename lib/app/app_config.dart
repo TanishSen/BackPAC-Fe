@@ -82,15 +82,40 @@ class AppConfig {
   static const String revenueCatGoogleKey =
       String.fromEnvironment('REVENUECAT_GOOGLE_KEY');
 
+  /// RevenueCat's Test Store (a `test_…` key): real offerings and a simulated
+  /// purchase sheet, no store account needed. **Debug and profile builds
+  /// only** — RevenueCat deliberately crashes a release build that carries
+  /// one, so PremiumService ignores it in release. For a demo, keep it in the
+  /// git-ignored dart_defines.local.json:
+  ///
+  ///   flutter run --dart-define-from-file=dart_defines.local.json
+  static const String revenueCatTestKey =
+      String.fromEnvironment('REVENUECAT_TEST_KEY');
+
   /// The entitlement configured in RevenueCat. Must match the backend's
   /// PREMIUM_ENTITLEMENT_ID.
   static const String premiumEntitlement =
       String.fromEnvironment('PREMIUM_ENTITLEMENT', defaultValue: 'premium');
 
-  /// Shown on the upgrade screen. The App Store requires both links on any
-  /// screen that sells a subscription; without them the button stays off.
-  static const String termsUrl = String.fromEnvironment('TERMS_URL');
-  static const String privacyUrl = String.fromEnvironment('PRIVACY_URL');
+  /// Shown on the upgrade screen and in settings. The App Store requires both
+  /// on any screen that sells a subscription. By default they are the pages
+  /// the backend serves itself (`/legal/terms`, `/legal/privacy`), so a build
+  /// pointed at a real API has working links with nothing else to host.
+  static String get termsUrl => _termsOverride.isNotEmpty
+      ? _termsOverride
+      : '$backendUrl/legal/terms';
+  static String get privacyUrl => _privacyOverride.isNotEmpty
+      ? _privacyOverride
+      : '$backendUrl/legal/privacy';
+  static const String _termsOverride = String.fromEnvironment('TERMS_URL');
+  static const String _privacyOverride = String.fromEnvironment('PRIVACY_URL');
+
+  /// Where "Contact support" writes to. Premium members' mail is marked
+  /// priority — the "Priority Support" perk.
+  static const String supportEmail = String.fromEnvironment(
+    'SUPPORT_EMAIL',
+    defaultValue: 'contact@tanishsen.com',
+  );
 
   /// True: tapping the mic opens a real voice call (backend + agent must be
   /// running). False: the built-in scripted demo, which needs no network and
