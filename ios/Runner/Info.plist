@@ -6,11 +6,12 @@
 	     terminated the moment it tries to record. -->
 	<key>NSMicrophoneUsageDescription</key>
 	<string>backPAC uses your microphone so you can talk to your travel assistant.</string>
-	<!-- Keeps the call alive when the screen locks mid-conversation. -->
+	<!-- Keeps the call alive when the screen locks mid-conversation. `audio`
+	     only: `voip` without PushKit/CallKit is an App Review rejection
+	     (guideline 2.5.4), and this app uses neither. -->
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
-		<string>voip</string>
 	</array>
 	<!-- iOS 14+ gates any connection to a device on the same Wi-Fi behind this
 	     prompt. Without the key the request fails with no explanation, which

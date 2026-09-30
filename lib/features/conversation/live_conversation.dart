@@ -41,9 +41,10 @@ class LiveConversation extends ChangeNotifier implements Conversation {
     String? opener,
     this.resumeSessionId,
     this.agentId = AppConfig.agentId,
-        // ignore: prefer_initializing_formals — a named parameter cannot
-        // start with an underscore, so `this._opener` is not expressible.
-  })  : _opener = opener,
+  })  // A named parameter cannot start with an underscore, so
+      // `this._opener` is not expressible.
+      // ignore: prefer_initializing_formals
+      : _opener = opener,
         _backend = backend ?? BackendClient(baseUrl: AppConfig.backendUrl) {
     _session = session ?? VoiceSession(_backend);
     // Show the opener straight away, before the call is even up. Someone who
@@ -363,11 +364,25 @@ class LiveConversation extends ChangeNotifier implements Conversation {
   /// still in the console for whoever is debugging.
   static String _friendlyError(Object error) {
     final String text = error.toString();
-    if (text.contains('503')) {
-      return 'The assistant is not configured yet. Check the server keys.';
+    if (text.contains('not signed in') || text.contains('expired') ||
+        text.contains('(401)')) {
+      return 'Your session has expired. Please sign in again.';
     }
-    if (text.contains('502')) {
-      return "The voice agent isn't running. Start BackPAC-Agent and try again.";
+    if (text.contains('(404)')) {
+      return "That conversation isn't available any more. Start a new one.";
+    }
+    if (text.contains('(402)')) {
+      return "You've used this month's free trip plans. Upgrade to Premium "
+          'from your profile, or carry on one of your earlier conversations.';
+    }
+    if (text.contains('(429)')) {
+      return "You've started a lot of calls just now. Give it a minute and try again.";
+    }
+    if (text.contains('(503)') || text.contains('(502)')) {
+      return 'The assistant is busy right now. Please try again in a moment.';
+    }
+    if (text.contains('timed out')) {
+      return 'This is taking too long. Check your connection and try again.';
     }
     return "Couldn't reach the assistant. Check your connection and try again.";
   }

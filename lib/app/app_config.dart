@@ -29,7 +29,10 @@ class AppConfig {
   /// alias that reaches the host. On a real phone neither works — pass your
   /// machine's LAN address with --dart-define=BACKEND_URL.
   static String get backendUrl {
-    if (_backendOverride.isNotEmpty) return _backendOverride;
+    // A trailing slash would make every path `//api/v1/…`, which 404s.
+    if (_backendOverride.isNotEmpty) {
+      return _backendOverride.replaceFirst(RegExp(r'/+$'), '');
+    }
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
       return 'http://10.0.2.2:8000';
     }
@@ -65,6 +68,29 @@ class AppConfig {
     'SUPABASE_PUBLISHABLE_KEY',
     defaultValue: 'sb_publishable_nls1xSVzzpkJCGEzOE-aHA_gpThjVwP',
   );
+
+  // --- Premium (RevenueCat) ----------------------------------------------
+  //
+  // Public SDK keys — one per store, from RevenueCat → Project settings → API
+  // keys. They identify the app to RevenueCat and are safe to ship; the
+  // *secret* key lives only on the backend. Empty (the default) means no
+  // purchasing on this build: every upgrade prompt stays hidden, rather than
+  // leading to a screen that cannot sell anything.
+
+  static const String revenueCatAppleKey =
+      String.fromEnvironment('REVENUECAT_APPLE_KEY');
+  static const String revenueCatGoogleKey =
+      String.fromEnvironment('REVENUECAT_GOOGLE_KEY');
+
+  /// The entitlement configured in RevenueCat. Must match the backend's
+  /// PREMIUM_ENTITLEMENT_ID.
+  static const String premiumEntitlement =
+      String.fromEnvironment('PREMIUM_ENTITLEMENT', defaultValue: 'premium');
+
+  /// Shown on the upgrade screen. The App Store requires both links on any
+  /// screen that sells a subscription; without them the button stays off.
+  static const String termsUrl = String.fromEnvironment('TERMS_URL');
+  static const String privacyUrl = String.fromEnvironment('PRIVACY_URL');
 
   /// True: tapping the mic opens a real voice call (backend + agent must be
   /// running). False: the built-in scripted demo, which needs no network and

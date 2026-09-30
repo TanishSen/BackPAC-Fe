@@ -8,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app/app.dart';
 import 'app/app_config.dart';
+import 'features/premium/premium_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -31,6 +32,11 @@ Future<void> main() async {
     // someone tries to use it.
     debugPrint('[backPAC] Supabase init failed: $e');
   }
+
+  // Premium, after sign-in so RevenueCat starts as the signed-in account.
+  // Not awaited: the store is not needed to draw the first frame, and with no
+  // key compiled in this returns at once and every upgrade prompt stays off.
+  unawaited(PremiumService.instance.configure());
 
   // Let the app's sounds coexist instead of evicting each other.
   //

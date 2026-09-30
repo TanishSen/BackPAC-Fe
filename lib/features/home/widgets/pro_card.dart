@@ -6,17 +6,22 @@ import 'package:flutter/material.dart';
 import '../../../app/app_theme.dart';
 import '../../../orb/rezolve_orb.dart';
 
-/// The banner with the orb, the remaining requests, and the upgrade nudge.
+/// The banner with the orb, what is left of the plan, and the upgrade nudge.
 class ProCard extends StatefulWidget {
   const ProCard({
     super.key,
-    required this.credits,
-    required this.onUpgrade,
     required this.onOrbTap,
+    this.badge,
+    this.onUpgrade,
   });
 
-  final int credits;
-  final VoidCallback onUpgrade;
+  /// "3 plans left this month", "Premium" — or null for no badge at all,
+  /// which is the state until Premium is on sale: a count of something with
+  /// no limit would be a number for its own sake.
+  final String? badge;
+
+  /// Null hides the upgrade button — nothing to sell, or already bought.
+  final VoidCallback? onUpgrade;
   final VoidCallback onOrbTap;
 
   @override
@@ -110,49 +115,56 @@ class _ProCardState extends State<ProCard> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                    decoration: BoxDecoration(
-                      color: AppColors.brandWash,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        const Icon(Icons.auto_awesome,
-                            size: 13, color: AppColors.brand),
-                        const SizedBox(width: 5),
-                        Flexible(
-                          child: Text(
-                            '${widget.credits} requests left',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: -0.1,
-                              color: AppColors.brand,
+                  if (widget.badge != null) ...<Widget>[
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.brandWash,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          const Icon(
+                            Icons.auto_awesome,
+                            size: 13,
+                            color: AppColors.brand,
+                          ),
+                          const SizedBox(width: 5),
+                          Flexible(
+                            child: Text(
+                              widget.badge!,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: -0.1,
+                                color: AppColors.brand,
+                              ),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 10),
+                    const SizedBox(height: 10),
+                  ],
                   AnimatedSwitcher(
                     duration: const Duration(milliseconds: 350),
                     transitionBuilder: (Widget child, Animation<double> a) =>
                         FadeTransition(
-                      opacity: a,
-                      child: SlideTransition(
-                        position: Tween<Offset>(
-                          begin: const Offset(0, 0.15),
-                          end: Offset.zero,
-                        ).animate(a),
-                        child: child,
-                      ),
-                    ),
+                          opacity: a,
+                          child: SlideTransition(
+                            position: Tween<Offset>(
+                              begin: const Offset(0, 0.15),
+                              end: Offset.zero,
+                            ).animate(a),
+                            child: child,
+                          ),
+                        ),
                     child: Text(
                       _order[_index],
                       key: ValueKey<String>(_order[_index]),
@@ -165,8 +177,10 @@ class _ProCardState extends State<ProCard> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  _Outlined(label: 'Update now', onTap: widget.onUpgrade),
+                  if (widget.onUpgrade != null) ...<Widget>[
+                    const SizedBox(height: 12),
+                    _Outlined(label: 'Upgrade now', onTap: widget.onUpgrade!),
+                  ],
                 ],
               ),
             ),

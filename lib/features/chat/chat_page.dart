@@ -30,6 +30,7 @@ class ChatPage extends StatefulWidget {
     this.resumeSessionId,
     this.conversation,
     this.autoListen = false,
+    this.initiallySaved = false,
   });
 
   final String title;
@@ -51,6 +52,10 @@ class ChatPage extends StatefulWidget {
   /// soon as it connects, so this only affects the demo.
   final bool autoListen;
 
+  /// Whether the conversation being resumed is already bookmarked, so the
+  /// save button shows the truth from the first frame.
+  final bool initiallySaved;
+
   @override
   State<ChatPage> createState() => _ChatPageState();
 }
@@ -69,7 +74,7 @@ class _ChatPageState extends State<ChatPage> {
 
   final ScrollController _scroll = ScrollController();
   final HistoryClient _history = HistoryClient();
-  bool _saved = false;
+  late bool _saved = widget.initiallySaved;
   bool _typingMode = false;
 
   @override

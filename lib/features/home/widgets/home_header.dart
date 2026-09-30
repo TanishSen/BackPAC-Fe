@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 
 import '../../../app/app_theme.dart';
+import '../../../app/widgets/round_icon_button.dart';
 
-/// "Hi, Jasmin" and the bell.
+/// "Hi, Jasmin", and the way to your profile.
 class HomeHeader extends StatelessWidget {
-  const HomeHeader({super.key, required this.name, required this.onBell});
+  const HomeHeader({super.key, required this.name, required this.onProfile});
 
   final String name;
-  final VoidCallback onBell;
+
+  /// Opens the profile — history, journey, plan, sign out.
+  final VoidCallback onProfile;
 
   @override
   Widget build(BuildContext context) {
@@ -25,41 +28,11 @@ class HomeHeader extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 12),
-        Semantics(
-          button: true,
-          label: 'Notifications, 1 unread',
-          child: Material(
-            color: AppColors.surface,
-            shape: const CircleBorder(),
-            child: InkWell(
-              onTap: onBell,
-              customBorder: const CircleBorder(),
-              child: SizedBox(
-                width: 48,
-                height: 48,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: <Widget>[
-                    const Icon(Icons.notifications_none_rounded,
-                        size: 23, color: AppColors.ink),
-                    Positioned(
-                      top: 13,
-                      right: 14,
-                      child: Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF34C759),
-                          shape: BoxShape.circle,
-                          border: Border.all(color: AppColors.surface, width: 1.5),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
+        RoundIconButton(
+          icon: Icons.person_outline_rounded,
+          tooltip: 'Profile',
+          size: 48,
+          onTap: onProfile,
         ),
       ],
     );

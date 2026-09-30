@@ -80,6 +80,10 @@ class VoiceSession {
 
   final BackendClient _backend;
   Room? _room;
+  // Set once the page that owns this session has gone. Every await in
+  // [start] can outlive the page — pressing Back while connecting — and
+  // carrying on after that joined a room nobody could see or leave.
+  bool _disposed = false;
   EventsListener<RoomEvent>? _listener;
   Timer? _levelPoll;
 
@@ -173,7 +177,7 @@ class VoiceSession {
     String? resumeSessionId,
   }) async {
     lastError = null;
-    _state.add(CallState.connecting);
+    _emit(CallState.connecting);
     try {
       final info = await _backend.startSession(
         agentId: agentId,
@@ -181,12 +185,24 @@ class VoiceSession {
         resumeSessionId: resumeSessionId,
       );
       this.info = info;
+      if (_disposed) {
+        // Gone before we joined: the agent is already waiting in the room.
+        unawaited(_backend.endSession(info.sessionId));
+        return;
+      }
 
       final room = Room();
+      // Held from the start, not once connected, so a dispose() mid-connect
+      // has a room to close.
+      _room = room;
       _listener = room.createListener();
       _wireEvents(_listener!);
 
       await room.connect(info.livekitUrl, info.token);
+      if (_disposed) {
+        unawaited(_backend.endSession(info.sessionId));
+        return;
+      }
 
       // Publish the mic, then mute it, so a call opens muted.
       //
@@ -211,16 +227,20 @@ class VoiceSession {
         debugPrint('[backPAC] microphone unavailable, continuing muted: $e');
       }
 
-      _room = room;
+      if (_disposed) {
+        unawaited(_backend.endSession(info.sessionId));
+        return;
+      }
       micEnabled.value = false; // muted, whether by us or by the refusal
       // The agent may already have been in the room when we connected, in
       // which case no event is coming and we would wait forever.
       if (room.remoteParticipants.isNotEmpty) _markAgentPresent(true);
       _startLevelPolling();
-      _state.add(CallState.live);
+      _emit(CallState.live);
     } catch (e) {
+      if (_disposed) return; // nobody is left to tell
       lastError = e.toString();
-      _state.add(CallState.error);
+      _emit(CallState.error);
       await _teardown();
       rethrow;
     }
@@ -238,7 +258,7 @@ class VoiceSession {
           _onMuteChanged(e.participant, false))
       ..on<RoomDisconnectedEvent>((_) {
         _stopLevelPolling();
-        _state.add(CallState.ended);
+        _emit(CallState.ended);
       });
   }
 
@@ -405,8 +425,14 @@ class VoiceSession {
   }
 
   Future<void> end() async {
+    final String? id = info?.sessionId;
+    if (id != null) unawaited(_backend.endSession(id));
     await _teardown();
-    _state.add(CallState.ended);
+    _emit(CallState.ended);
+  }
+
+  void _emit(CallState s) {
+    if (!_state.isClosed) _state.add(s);
   }
 
   Future<void> _teardown() async {
@@ -420,6 +446,7 @@ class VoiceSession {
   }
 
   void dispose() {
+    _disposed = true;
     _stopLevelPolling();
     _listener?.dispose();
     _room?.dispose();

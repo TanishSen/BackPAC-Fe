@@ -6,6 +6,7 @@ import 'package:backPAC/features/home/home_page.dart';
 import 'package:backPAC/features/home/widgets/history_section.dart';
 import 'package:backPAC/features/home/widgets/travel_modes.dart';
 import 'package:backPAC/features/home/widgets/trip_ideas_row.dart';
+import 'package:backPAC/features/profile/profile_page.dart';
 
 void usePhone(WidgetTester tester) {
   tester.view.physicalSize = const Size(390 * 3, 844 * 3);
@@ -26,7 +27,9 @@ void main() {
     await settleEntrances(tester);
 
     expect(find.text('Hi, Jasmin'), findsOneWidget);
-    expect(find.text('24 requests left'), findsOneWidget);
+    // No made-up allowance: until Premium is on sale there is no count to show.
+    expect(find.textContaining('left this month'), findsNothing);
+    expect(find.textContaining('requests left'), findsNothing);
     expect(find.byType(TravelModes), findsOneWidget);
     expect(find.text('Trains'), findsWidgets);
     // The row is horizontal and lazily built, so the last card starts offscreen.
@@ -95,5 +98,18 @@ void main() {
 
     expect(find.text('Hotel in Jaipur'), findsOneWidget);
     expect(find.text('Trains to Varanasi'), findsNothing);
+  });
+
+  testWidgets('the profile button replaces the bell and opens the profile',
+      (WidgetTester tester) async {
+    usePhone(tester);
+    await tester.pumpWidget(MaterialApp(home: HomePage(name: 'Jasmin', loadHistory: () async => kHistory)));
+    await settleEntrances(tester);
+
+    expect(find.byIcon(Icons.notifications_none_rounded), findsNothing);
+    await tester.tap(find.byTooltip('Profile'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.byType(ProfilePage), findsOneWidget);
   });
 }

@@ -7,7 +7,13 @@ import '../../data/trip_data.dart';
 import '../../app/transitions.dart';
 import '../chat/chat_page.dart';
 import '../auth/data/auth_service.dart';
+import '../../app/api.dart';
 import '../history/data/history_client.dart';
+import '../history/history_page.dart';
+import '../premium/premium_service.dart';
+import '../premium/upgrade_page.dart';
+import '../profile/data/profile_client.dart';
+import '../profile/profile_page.dart';
 import '../voice/voice_controller.dart';
 import '../voice/widgets/mic_button.dart';
 import 'widgets/history_section.dart';
@@ -44,10 +50,13 @@ class HomePage extends StatefulWidget {
 typedef HistoryLoader = Future<List<TripHistoryEntry>> Function();
 
 class _HomePageState extends State<HomePage> {
-  static const int _credits = 24;
-
   late final HistoryClient? _history =
       widget.loadHistory == null ? HistoryClient() : null;
+  final ProfileClient _profile = ProfileClient();
+
+  /// Premium, and what is left of the free allowance. Unknown until loaded —
+  /// and unknown means no badge and no upgrade button, never a guess.
+  PlanInfo _plan = PlanInfo.unknown;
 
   /// Who to greet. The signed-in person, or a neutral fallback.
   ///
@@ -69,13 +78,65 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     unawaited(_refreshHistory());
+    unawaited(_refreshPlan());
   }
 
   @override
   void dispose() {
     _idleLevel.dispose();
     _history?.dispose();
+    _profile.dispose();
     super.dispose();
+  }
+
+  Future<void> _refreshPlan() async {
+    try {
+      final PlanInfo plan = await _profile.plan();
+      if (mounted) setState(() => _plan = plan);
+    } on ApiException {
+      // The card simply shows no badge; history reports real failures.
+    }
+  }
+
+  /// "3 plans left this month", "Premium", or nothing while Premium is not
+  /// for sale.
+  String? get _planBadge {
+    if (_plan.premium) return 'Premium';
+    final int? left = _plan.remainingThisMonth;
+    if (!_plan.billingEnabled || left == null) return null;
+    return left == 1 ? '1 plan left this month' : '$left plans left this month';
+  }
+
+  bool get _canUpgrade =>
+      _plan.billingEnabled && !_plan.premium && PremiumService.instance.canSell;
+
+  Future<void> _openUpgrade() async {
+    final bool? bought = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => UpgradePage(
+          premium: PremiumService.instance,
+          client: _profile,
+          plan: _plan,
+        ),
+      ),
+    );
+    if (bought == true) unawaited(_refreshPlan());
+  }
+
+  Future<void> _openProfile() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const ProfilePage()),
+    );
+    if (!mounted) return;
+    unawaited(_refreshHistory());
+    unawaited(_refreshPlan());
+  }
+
+  Future<void> _openHistory() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const HistoryPage()),
+    );
+    if (mounted) unawaited(_refreshHistory());
   }
 
   /// Load the history list. Safe to call again — pull-to-refresh does, and so
@@ -153,6 +214,7 @@ class _HomePageState extends State<HomePage> {
     String title = 'New trip',
     bool listen = false,
     String? resumeSessionId,
+    bool saved = false,
   }) async {
     await Navigator.of(context).push(
       SlideUpRoute<void>(
@@ -161,12 +223,16 @@ class _HomePageState extends State<HomePage> {
           opener: opener,
           resumeSessionId: resumeSessionId,
           autoListen: listen,
+          initiallySaved: saved,
         ),
       ),
     );
     // A conversation may have been started, added to or renamed while that
-    // screen was open, so the list behind it is now out of date.
-    if (mounted) unawaited(_refreshHistory());
+    // screen was open, so the list behind it is now out of date — and a new
+    // one has used a plan.
+    if (!mounted) return;
+    unawaited(_refreshHistory());
+    unawaited(_refreshPlan());
   }
 
   void _soon(String what) {
@@ -213,7 +279,7 @@ class _HomePageState extends State<HomePage> {
                         index: 0,
                         child: HomeHeader(
                           name: _greetingName,
-                          onBell: () => _soon('Notifications'),
+                          onProfile: _openProfile,
                         ),
                       ),
                     ),
@@ -229,8 +295,8 @@ class _HomePageState extends State<HomePage> {
                       child: Stagger(
                         index: 1,
                         child: ProCard(
-                          credits: _credits,
-                          onUpgrade: () => _soon('Pro'),
+                          badge: _planBadge,
+                          onUpgrade: _canUpgrade ? _openUpgrade : null,
                           onOrbTap: () => _openChat(),
                         ),
                       ),
@@ -312,13 +378,14 @@ class _HomePageState extends State<HomePage> {
                           error: _historyError,
                           onRetry: _refreshHistory,
                           onDelete: _deleteHistory,
-                          onViewAll: () => _soon('Full history'),
+                          onViewAll: _openHistory,
                           // Resume, never replay. Passing the preview as an
                           // opener made the app say the agent's own last line
                           // back to it as though the user had.
                           onOpen: (TripHistoryEntry e) => _openChat(
                             title: e.title,
                             resumeSessionId: e.id,
+                            saved: e.saved,
                           ),
                         ),
                       ),

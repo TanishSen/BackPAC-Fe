@@ -221,3 +221,40 @@ const List<TripHistoryEntry> kHistory = <TripHistoryEntry>[
     when: 'Last week',
   ),
 ];
+
+/// A picture for a conversation, from what it was about.
+///
+/// The history list gives every trip a face — a beach for Goa, a cable car for
+/// Manali — and the words already say which: the title is the traveller's own
+/// first sentence. Keywords first, because "resorts in Goa" is a beach trip
+/// whichever search it ran; then how they travelled; then a plain speech
+/// bubble for a chat that never settled on anything.
+String tripEmoji(String title, String preview, TravelMode? mode) {
+  final String text = '$title $preview'.toLowerCase();
+  for (final (List<String> words, String emoji) in _emojiRules) {
+    if (words.any(text.contains)) return emoji;
+  }
+  return switch (mode) {
+    TravelMode.trains => '🚆',
+    TravelMode.flights => '✈️',
+    TravelMode.bus => '🚌',
+    TravelMode.hotels => '🏨',
+    null => '💬',
+  };
+}
+
+const List<(List<String>, String)> _emojiRules = <(List<String>, String)>[
+  (<String>['paraglid', 'skydiv'], '🪂'),
+  (<String>['cable car', 'ropeway', 'gondola'], '🚡'),
+  (<String>['hike', 'hiking', 'trek', 'cycling', 'bike ride'], '🚵'),
+  (<String>['ski', 'snow', 'gulmarg', 'auli'], '🏂'),
+  (<String>['desert', 'dune', 'jaisalmer', 'thar'], '🏜️'),
+  (<String>['beach', 'goa', 'resort', 'island', 'andaman', 'maldives', 'coast', 'gokarna', 'varkala'], '🏖️'),
+  (<String>['backwater', 'houseboat', 'alleppey', 'kerala', 'lake'], '🛶'),
+  (<String>['mountain', 'manali', 'himalaya', 'ladakh', 'leh', 'shimla', 'spiti', 'darjeeling', 'munnar', 'hill'], '🏔️'),
+  (<String>['safari', 'wildlife', 'jungle', 'tiger', 'national park'], '🐯'),
+  (<String>['temple', 'varanasi', 'rishikesh', 'pilgrim', 'amritsar'], '🛕'),
+  (<String>['fort', 'palace', 'jaipur', 'udaipur', 'heritage'], '🏰'),
+  (<String>['honeymoon', 'romantic', 'anniversary'], '💞'),
+  (<String>['food', 'street food', 'cafe', 'restaurant'], '🍜'),
+];

@@ -5,6 +5,7 @@
 /// The app joins the room with that token (see [VoiceSession]).
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import '../auth/data/auth_service.dart';
@@ -115,6 +116,12 @@ class BackendClient {
         'participantName': ?participantName,
         'resumeSessionId': ?resumeSessionId,
       }),
+    ).timeout(
+      // The backend waits up to 20s for the agent to join, on top of a cold
+      // database. Past this, a stalled network is the likelier story, and
+      // "Starting a session…" must end in something the user can act on.
+      const Duration(seconds: 40),
+      onTimeout: () => throw TimeoutException('startSession timed out'),
     );
     if (resp.statusCode == 401) {
       throw Exception('startSession failed: your session expired — sign in again');
@@ -123,6 +130,22 @@ class BackendClient {
       throw Exception('startSession failed (${resp.statusCode}): ${resp.body}');
     }
     return SessionInfo.fromJson(jsonDecode(resp.body) as Map<String, dynamic>);
+  }
+
+  /// Tell the backend the call is over, so it releases the agent now rather
+  /// than when the agent notices the room is empty. Best effort: never throws,
+  /// because hanging up must always work.
+  Future<void> endSession(String sessionId) async {
+    final token = AuthService().accessToken;
+    if (token == null) return;
+    try {
+      await _http.post(
+        Uri.parse('$baseUrl/api/v1/sessions/$sessionId/end'),
+        headers: {'Authorization': 'Bearer $token'},
+      ).timeout(const Duration(seconds: 5));
+    } catch (_) {
+      // The agent also ends the call when the room empties.
+    }
   }
 
   void dispose() => _http.close();
